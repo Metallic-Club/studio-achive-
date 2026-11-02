@@ -28,7 +28,8 @@ and #213/#215 land. The coordinator scoped this down: no viewport, selection sta
 - History: turn `StrokeCommit` into one command (create `added` under `parent` with the tag; delete `removed`).
 - Selection: feed projected `ScreenItem`s; route `combine` into `EditorState`'s selection; Shift+G menu.
 - Measure: use #215's snapping for clicks; draw lines and Alt-hover readouts.
-- Tags and `LookOverride` are not in `metallic_core` yet; `PartTraits.tags` / `.style` are filled once they exist.
+- (History note: this list is from before #10. The wiring landed in #319; box select and Same Tags in
+  `docs/agents/218-220-select-duplicate.md`: `PartTraits.tags` reads `World::tags`.)
 
 ## Commands
 ```

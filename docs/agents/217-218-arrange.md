@@ -24,6 +24,8 @@ Goal: align, distribute, mirror and arrays for the building tools (spec `docs/de
   spacing within 1% measured by independent integration). No `metallic_core` changes.
 
 ## Next (after #10 and #213 land)
+- (History note: this list is from before #10. The wiring landed in #319; smart duplicate and the wheel over the handle
+  in `docs/agents/218-220-select-duplicate.md`.)
 - Commit a `Plan` as one `History` step (batched `SetProperties` plus clone/create); undo tests there.
 - Live preview from the plan (moved parts in the overlay, copies as 60% ghosts); Esc clears it.
 - Popovers: Align (A), Mirror (Ctrl+M / Ctrl+Shift+M), Array (Ctrl+Shift+D) with the drag handle.

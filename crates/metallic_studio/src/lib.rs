@@ -20,7 +20,8 @@
 //!
 //! Building core (#213-#215): [`preview`] (the gesture overlay: one gesture, one undo step),
 //! [`snapping`] (point and surface snapping), [`pivot`] (pivots and rigid motions) and the
-//! drag behaviours in [`gizmo`] and [`viewport`].
+//! drag behaviours in [`gizmo`] and [`viewport`]. [`smart_duplicate`] repeats a moved copy's
+//! offset on Ctrl+D.
 //!
 //! [`colour`] holds the building colour popover, its colour maths and palette files; it also runs
 //! as a demo screen (`--scene colour`).
