@@ -5,7 +5,9 @@
 //! method, signal, callback, child by name. Names are unique across a class's members, so one
 //! table lookup covers the first four. See `api/host_api.rs` for the host side.
 
+use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
+use std::ffi::CStr;
 use std::rc::Rc;
 
 use metallic_core::classes::{
@@ -14,7 +16,7 @@ use metallic_core::classes::{
 use metallic_core::transform;
 use metallic_core::{CoreError, InstanceId, Value as CoreValue};
 use mlua::{
-    AnyUserData, BorrowedStr, FromLua, Function, Lua, MetaMethod, Table, Thread, UserData,
+    AnyUserData, BorrowedStr, FromLua, Function, Lua, MetaMethod, MultiValue, Table, Thread, UserData,
     UserDataFields, UserDataMethods, UserDataRef, Value,
 };
 
@@ -260,6 +262,7 @@ impl UserData for LuaInstance {
                 |lua, (this, key): (UserDataRef<LuaInstance>, Value)| index(lua, &this, key),
             )
         });
+        fields.add_meta_field_with("__namecall", namecall_metamethod);
         fields.add_meta_field_with(MetaMethod::NewIndex, |lua| {
             errors::guarded_fn(
                 lua,
@@ -350,9 +353,63 @@ impl FromLua for TextArgument {
 #[cfg(test)]
 mod read_probe;
 
+/// `__namecall`: `obj:Method(...)` without the `__index` metamethod and its error guard.
+///
+/// Written in Luau because a method may yield, which a Rust caller would not allow. `resolve` reads
+/// the method name the VM left for this call and never raises: anything that is not a function
+/// comes back as a function that raises what `__index` plus the call would have.
+fn namecall_metamethod(lua: &Lua) -> mlua::Result<Function> {
+    let resolve =
+        lua.create_function(|lua, this: UserDataRef<LuaInstance>| namecall_target(lua, &this))?;
+    lua.load("local resolve = ...\nreturn function(self, ...) return resolve(self)(self, ...) end")
+        .set_name("=[engine]")
+        .call(resolve)
+}
+
+fn namecall_target(lua: &Lua, this: &LuaInstance) -> mlua::Result<Function> {
+    // SAFETY: this runs in the C function the namecall's own frame just called, on the thread
+    // that made it, so the pointer is that call's interned method name (or null, handled below),
+    // and the string stays alive in the calling function's constants.
+    let name = unsafe {
+        let name = mlua::ffi::lua_namecallatom(lua.state(), std::ptr::null_mut());
+        (!name.is_null()).then(|| CStr::from_ptr(name))
+    };
+    let name = name.map_or(Cow::Borrowed(""), CStr::to_string_lossy);
+    let error = match index_member(lua, this, &name) {
+        Ok(Value::Function(function)) => return Ok(function),
+        // The texts the VM has for a nil method and for calling any other value.
+        Ok(Value::Nil) => lua_error(format!(
+            "attempt to call missing method '{name}' of Instance"
+        )),
+        Ok(other) => lua_error(format!(
+            "attempt to call a {} value",
+            luau_type_name(&other)
+        )),
+        Err(error) => error,
+    };
+    errors::guarded_fn(lua, move |_, _: MultiValue| -> mlua::Result<()> {
+        Err(error.clone())
+    })
+}
+
+/// What the VM calls a value in an error: the `__type` name of a userdata.
+fn luau_type_name(value: &Value) -> String {
+    match value {
+        Value::UserData(ud) => ud.type_name().map_or_else(
+            |_| "userdata".to_string(),
+            |name| name.to_string_lossy().to_string(),
+        ),
+        Value::Integer(_) => "number".to_string(),
+        other => other.type_name().to_string(),
+    }
+}
+
 fn index(lua: &Lua, this: &LuaInstance, key: Value) -> mlua::Result<Value> {
     let member = member_name(&key)?;
-    let key = member.as_ref();
+    index_member(lua, this, member.as_ref())
+}
+
+fn index_member(lua: &Lua, this: &LuaInstance, key: &str) -> mlua::Result<Value> {
     let state = &this.state;
     let mut host = state.host();
     let resolved = host
