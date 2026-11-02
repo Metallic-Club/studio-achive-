@@ -13,8 +13,8 @@ use crate::{ConnectionId, InstanceId, World};
 /// [`InstanceId::to_bits`]; the binding converts at that edge. It carries no class and no pointer.
 pub type Handle = InstanceId;
 
-/// What every language binding calls. The first implementation is the Luau binding (#462), the
-/// next the WASM one (#474).
+/// What every language binding calls. The first implementation is the Luau one
+/// (`metallic_script/src/api/host_api.rs`), the next the WASM one (#474).
 ///
 /// `class` is the class that declares the member, which is what a generated wrapper knows. By the
 /// prefix rule the member has the same id in `class` and in the instance's own class. An

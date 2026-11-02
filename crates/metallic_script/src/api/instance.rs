@@ -16,8 +16,8 @@ use metallic_core::classes::{
 use metallic_core::transform;
 use metallic_core::{CoreError, InstanceId, Value as CoreValue};
 use mlua::{
-    AnyUserData, BorrowedStr, FromLua, Function, Lua, MetaMethod, MultiValue, Table, Thread,
-    UserData, UserDataFields, UserDataMethods, UserDataRef, Value,
+    AnyUserData, Function, Lua, MetaMethod, MultiValue, Table, Thread, UserData, UserDataFields,
+    UserDataMethods, UserDataRef, Value,
 };
 
 use super::cframe::{LuaCFrame, cframe};
@@ -314,39 +314,6 @@ fn member_name(key: &Value) -> mlua::Result<MemberName> {
             "an Instance member name must be a string, got {}",
             other.type_name()
         ))),
-    }
-}
-
-/// A method's text argument, borrowed from Luau so a call allocates no string. Whatever is not
-/// valid text goes through `String`'s own conversion, for the same coercion and error.
-enum TextArgument {
-    Borrowed(BorrowedStr),
-    Owned(String),
-}
-
-impl AsRef<str> for TextArgument {
-    fn as_ref(&self) -> &str {
-        match self {
-            Self::Borrowed(value) => value.as_ref(),
-            Self::Owned(value) => value.as_str(),
-        }
-    }
-}
-
-impl FromLua for TextArgument {
-    fn from_lua(value: Value, lua: &Lua) -> mlua::Result<Self> {
-        let Value::String(text) = &value else {
-            return String::from_lua(value, lua).map(Self::Owned);
-        };
-        text.to_str().map(Self::Borrowed).map_err(|_| {
-            // The text of a `String` parameter, rather than of a borrowed one.
-            let bytes = text.as_bytes();
-            mlua::Error::FromLuaConversionError {
-                from: "string",
-                to: "String".into(),
-                message: std::str::from_utf8(&bytes).err().map(|e| e.to_string()),
-            }
-        })
     }
 }
 
@@ -655,16 +622,15 @@ pub(crate) fn methods(
     now: &Rc<Cell<f64>>,
 ) -> mlua::Result<Vec<(&'static str, Function)>> {
     let find = lua.create_function(
-        |lua, (this, name, recursive): (UserDataRef<LuaInstance>, TextArgument, Option<bool>)| {
+        |lua, (this, name, recursive): (UserDataRef<LuaInstance>, String, Option<bool>)| {
             this.live()?;
-            let name = name.as_ref();
             let world = this.state.world()?;
             let found = if recursive == Some(true) {
                 descendants(&world, this.id).into_iter().find(
                     |&d| matches!(world.get(d, "Name"), Ok(CoreValue::String(ref s)) if *s == name),
                 )
             } else {
-                world.find_first_child(this.id, name)
+                world.find_first_child(this.id, &name)
             };
             drop(world);
             this.state.wrap_opt(lua, found)
@@ -683,12 +649,10 @@ pub(crate) fn methods(
         };
         id_list(lua, &this.state, &ids)
     })?;
-    let is_a = lua.create_function(
-        |_, (this, class): (UserDataRef<LuaInstance>, TextArgument)| {
-            this.live()?;
-            Ok(this.state.world()?.is_a(this.id, class.as_ref()))
-        },
-    )?;
+    let is_a = lua.create_function(|_, (this, class): (UserDataRef<LuaInstance>, String)| {
+        this.live()?;
+        Ok(this.state.world()?.is_a(this.id, &class))
+    })?;
     let destroy = lua.create_function(|_, this: UserDataRef<LuaInstance>| {
         let mut world = this.state.world_mut()?;
         if !world.is_alive(this.id) {
