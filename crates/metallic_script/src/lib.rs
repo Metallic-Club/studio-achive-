@@ -20,7 +20,8 @@
 //! Instance members come from the class registry: `api/instance.rs` resolves a name through the
 //! instance's class and calls `HostApi` (`api/host_api.rs`), so a member a class file declares is
 //! visible to scripts with no change here. [`host_methods`] is the table of methods core declares
-//! `Host` and this crate implements.
+//! `Host` and this crate implements. Signals are such members too: `api/signals.rs` holds each VM's
+//! connections by `SignalKey` and delivers what the host and core fire, on the next `step`.
 //!
 //! ## Budgets in tests
 //!

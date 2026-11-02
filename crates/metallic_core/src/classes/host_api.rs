@@ -54,6 +54,9 @@ pub trait HostApi {
         args: &[ScriptValue],
     ) -> Result<CallOutcome, ApiError>;
     /// Connects a handler to a signal; `arg` selects a parameterized signal's key, otherwise 0.
+    ///
+    /// The subscriber is a [`FunctionRef`], so nothing here depends on the language it is written
+    /// in. It is called with the signal's payload on each fire, deferred to the next step.
     fn connect_signal(
         &mut self,
         h: Handle,
@@ -308,7 +311,8 @@ impl<S> MethodDispatch<'_, S> {
         };
         // #468 checks `member.context` against `self.context.side` here, before the arguments.
         check_arguments(self.world, class_name, desc, args)?;
-        let mut call = MethodCall::new(&mut *self.world, h, class_name, desc, args, self.context);
+        let mut call = MethodCall::new(&mut *self.world, h, class_name, desc, args, self.context)
+            .in_registry(self.registry);
         let result = match desc.implementation {
             MethodImpl::Native(body) => body(&mut call),
             MethodImpl::Host => match self.methods.get(decl) {

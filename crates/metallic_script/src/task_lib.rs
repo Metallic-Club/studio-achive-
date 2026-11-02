@@ -234,6 +234,19 @@ impl Scheduler {
             .and_then(|state| (state.owner != 0 && !state.cancelled.get()).then_some(state.owner))
     }
 
+    /// Records `thread` (with the current owner, if it has no state yet) so cancelling that
+    /// owner also blocks it. For threads that park themselves, like `Event:Wait()`.
+    pub(crate) fn adopt(&self, thread: &Thread) -> Result<()> {
+        let lua = self.lua()?;
+        self.register(&lua, thread).map(|_| ())
+    }
+
+    /// Whether a parked `thread` may still be resumed: suspended, not cancelled, not queued.
+    pub(crate) fn can_resume_parked(&self, thread: &Thread) -> bool {
+        thread.status() == mlua::thread::ThreadStatus::Resumable
+            && self.can_resume(thread).unwrap_or(false)
+    }
+
     /// The owner of the code that is running now (0 outside any script).
     pub(crate) fn current_owner(&self) -> u64 {
         self.current.get()

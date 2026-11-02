@@ -19,19 +19,22 @@ pub(crate) mod host_methods;
 mod input;
 mod instance;
 mod pivot;
+mod property_signals;
 mod remote;
 mod require;
 mod script_value;
 mod services;
-mod signals;
+pub(crate) mod signals;
 mod tags;
 
 use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use metallic_core::classes::{DeclId, HostMethods, Registry};
-use metallic_core::{InstanceId, World};
+use metallic_core::classes::{
+    ApiError, ClassId, DeclId, FunctionRef, HostApi, HostMethods, MemberId, Registry,
+};
+use metallic_core::{ConnectionId, InstanceId, World};
 use mlua::{Error, Function, Table, WeakLua};
 
 use host_methods::HostState;
@@ -45,7 +48,7 @@ pub use input::{
 };
 pub(crate) use instance::LuaInstance;
 pub(crate) use remote::{QueuedRemote, RemoteTarget};
-pub(crate) use signals::{EventKind, Hub, Pacing};
+pub(crate) use signals::{Hub, InstanceSignals, Pacing};
 
 /// State shared by the server VM and the client VM of one [`ScriptHost`](crate::ScriptHost).
 #[derive(Default)]
@@ -89,6 +92,10 @@ pub(crate) struct ApiState {
     pub(crate) sink: Rc<dyn OutputSink>,
     pub(crate) shared: Rc<HostShared>,
     pub(crate) hub: Hub,
+    /// The ids of the signals every instance has.
+    pub(crate) instance_signals: InstanceSignals,
+    /// Who watches `Changed`, and where the journal was last read.
+    props: property_signals::PropWatch,
     pub(crate) pacing: Pacing,
     pub(crate) lua: WeakLua,
     /// Weak-valued table `instance id -> userdata`, so one instance is one Lua object.
@@ -207,6 +214,54 @@ impl FixtureApi {
     pub fn prune(&self) {
         self.0.prune_hub();
     }
+
+    /// Delivers the signals fired through the world, and the property changes, as a step does.
+    pub fn deliver_signals(&self) {
+        let queued = self.0.world.borrow_mut().signals_mut().take();
+        for signal in &queued {
+            self.0.deliver_signal(signal);
+        }
+        self.0.deliver_property_changes();
+    }
+
+    /// [`HostApi::connect_signal`] with a function reference, in this VM's table of references for
+    /// the length of the call, as a binding makes one.
+    pub fn connect_signal(
+        &self,
+        h: InstanceId,
+        class: ClassId,
+        m: MemberId,
+        arg: u32,
+        function: Function,
+    ) -> Result<ConnectionId, ApiError> {
+        let mark = self.0.functions.mark();
+        let reference = self.0.functions.add(function);
+        let connected = self.connect_signal_ref(h, class, m, arg, reference);
+        self.0.functions.release_since(mark);
+        connected
+    }
+
+    /// [`HostApi::connect_signal`] as it is.
+    pub fn connect_signal_ref(
+        &self,
+        h: InstanceId,
+        class: ClassId,
+        m: MemberId,
+        arg: u32,
+        function: FunctionRef,
+    ) -> Result<ConnectionId, ApiError> {
+        self.0.host().connect_signal(h, class, m, arg, function)
+    }
+
+    /// [`HostApi::disconnect`].
+    pub fn disconnect(&self, connection: ConnectionId) {
+        self.0.host().disconnect(connection);
+    }
+
+    /// True when the world knows someone listens to `key`.
+    pub fn watched(&self, key: &metallic_core::classes::SignalKey) -> bool {
+        self.0.world.borrow().signal_is_watched(key)
+    }
 }
 
 fn build(
@@ -260,6 +315,8 @@ fn build(
         sink,
         shared,
         hub: Hub::default(),
+        instance_signals: InstanceSignals::resolve(classes.registry)?,
+        props: property_signals::PropWatch::default(),
         pacing: Pacing::default(),
         lua: lua.weak(),
         cache,

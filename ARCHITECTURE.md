@@ -35,6 +35,7 @@ apps.
   discovered by `build.rs`, resolved once into flat per-class tables; see "How to add a class") with typed
   properties and defaults; `Signal<Args>` with opaque connection IDs shared across argument types (foreign IDs
   cannot disconnect a handler, identities are never reused, exhaustion panics before registration);
+  `SignalQueue` in the world, where a class's declared signals wait for the script host (`World::fire`, see "How to add a signal");
   property-signal keys borrow known static registry names and own unknown/unresolved registration names,
   preserving exact text equality and the existing unvalidated-registration/cleanup behavior. This avoids
   temporary known-name lookup allocations; owned Value/default clones and stored property keys are separate.
@@ -694,15 +695,59 @@ MethodDesc::native("SetLit", set_lit)
   Each method declaration has one Luau function per VM, cached by `DeclId`. `obj:Method()` goes through `__namecall`, reads the
   method name the VM left for the call and skips `__index`; a call fills a per-VM argument buffer, so it allocates no list. A
   method with `.yields()` gets a small Luau trampoline, because only Luau code can yield its own thread. Still outside the
-  generic path: the arms `api/instance.rs` keeps for #463 and #464 (`tests/generic_binding.rs` lists them and fails on a new or
+  generic path: the arms `api/instance.rs` keeps for #464 (`tests/generic_binding.rs` lists them and fails on a new or
   stale one) and the bridge table above.
   `MethodDispatch` holds that order once. `metallic_core` depends on no scripting language; `tests/call_convention.rs` walks
   `Cargo.lock` to hold that.
 
+## How to add a signal
+A signal is a member like a property or a method: declared once, in the class file, inherited by subclasses, and visible to
+Luau with no change to the binding (design section 6). Connecting a name the class does not declare gives the usual
+`X is not a valid member of Part`.
+
+```rust
+static LIT_CHANGED: SignalDesc = SignalDesc::new("LitChanged")
+    .params(&[Param::new("lit", Ty::Bool)])
+    .describe("The beacon was lit or put out.");
+
+fn set_lit(call: &mut MethodCall) -> Result<CallOutcome, ApiError> {
+    let lit = call.bool(0)?;
+    call.world.set(call.this, "Lit", Value::Bool(lit))?;
+    call.fire("LitChanged", vec![lit.into()])?; // queued; handlers run on the next step
+    Ok(ScriptValue::Nil.into())
+}
+
+pub static CLASS: ClassDesc = ClassDesc::new("Beacon", Some("Instance"))
+    // ...
+    .signals(&[&LIT_CHANGED]);
+```
+
+- **Declaring** changes `registry_hash`: `registry_hash_is_pinned` tells you to update it. `.params` are the payload and
+  `.variadic(Ty::Any)` an open end. `.context(MemberContext::Server)` refuses it on the other side, both when the member is read
+  and in `connect_signal`. `.parameterized()` says `SignalKey::arg` may select a part of it, as `GetPropertyChangedSignal(name)`
+  does of `Changed`. Every signal needs `.describe()`: `tests/signal_queue.rs` fails otherwise.
+- **Firing** from core: `MethodCall::fire(name, args)` in a method body, or `World::fire(id, signal, args)` with a member id from
+  `class.member("LitChanged")` (the same id in every subclass, by the prefix rule). A fire waits in the world's `SignalQueue`
+  until `ScriptHost::step`, like every signal; it costs one lookup and queues nothing while nobody listens. Check
+  `World::signal_is_watched` first when the payload is costly to build.
+- **Firing from the engine** (physics, the runtime): add an entry point on `ScriptHost` next to `touched`, in the host's own input
+  queue, and fire by name in `deliver_inputs`. That queue is per host, works while the world is borrowed, and hears a script
+  started in the same step, which `World::fire` does not (it only queues for keys already watched).
+- **Property changes need nothing:** `Changed` and `GetPropertyChangedSignal(name)` work for every property of every class, fed once
+  per step from the change journal (`api/property_signals.rs`), so `World::set` pays nothing for them.
+- **Connecting** is `HostApi::connect_signal(h, class, m, arg, f)` with `f` a language-neutral `FunctionRef`; `disconnect` takes the
+  `ConnectionId` it returned. In Luau a signal object also has `Once` and `Wait`. A yielding method can wait with
+  `CallOutcome::Wait(WaitRequest::Signal { key: call.signal("LitChanged", 0)? })`, and a method declared `.returns(Ty::Signal)`
+  hands a script a signal object as `ScriptValue::Signal(key)`.
+- **Delivery** is in the per-VM `Hub` (`api/signals.rs`), keyed by `SignalKey { instance, signal, arg }`: snapshot before dispatch,
+  10,000 connections per signal, one time budget per step, disconnected after repeated timeouts. Nothing there names a class
+  or an event. Three signals have no class yet: `UserInputService.LastInputTypeChanged` and `CollectionService`'s two use reserved
+  ids until #466 and #467 make those services classes.
+
 ## Where to add things
 - **A new Instance class or property:** one class file (see "How to add a class"), a test in `tests/tree.rs`; the Luau API
   picks up registry properties by name; Studio's Properties panel and Insert lists read the class file.
-- **A method, signal or callback of an Instance class:** its class file (see "How to write a method"), not `api/instance.rs`:
+- **A method, signal or callback of an Instance class:** its class file (see "How to write a method" and "How to add a signal"), not `api/instance.rs`:
   a test fails on a new class-name literal there. **Any other Luau API:** `metallic_script/src/api/` (`datatypes.rs`,
   `services.rs`, `remote.rs`), a test in `tests/api.rs`, and a line in `docs/luau-api.md`.
 - **A material:** the `MATERIAL` enum in `classes/parts/base_part.rs`, its row in `metallic_render/src/materials.rs` (roughness, metalness,

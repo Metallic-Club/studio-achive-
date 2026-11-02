@@ -114,6 +114,7 @@ fn hash_ty(hash: &mut Sha256, ty: &Ty) {
         Ty::Optional(_) => 14,
         Ty::Tuple(_) => 15,
         Ty::Any => 16,
+        Ty::Signal => 17,
     };
     hash.update([tag]);
     match ty {
@@ -215,6 +216,10 @@ fn hash_member(hash: &mut Sha256, member: &Member, owner: &str, defaults: &[Valu
         }
         MemberKind::Signal { desc, .. } => {
             hash_params(hash, desc.params);
+            hash.update([u8::from(desc.variadic.is_some())]);
+            if let Some(variadic) = &desc.variadic {
+                hash_ty(hash, variadic);
+            }
             hash.update([u8::from(desc.parameterized)]);
             optional_field(hash, desc.deprecated);
         }
@@ -516,6 +521,27 @@ mod tests {
                 .describe("Text.")
                 .category("Text")])
         );
+    }
+
+    #[test]
+    fn fingerprint_covers_a_signals_shape_and_side_but_not_its_description() {
+        use crate::classes::{MemberContext, SignalDesc, Ty};
+        static PLAIN: SignalDesc = SignalDesc::new("Fired");
+        static OPEN: SignalDesc = SignalDesc::new("Fired").variadic(Ty::Any);
+        static KEYED: SignalDesc = SignalDesc::new("Fired").parameterized();
+        static SIDED: SignalDesc = SignalDesc::new("Fired").context(MemberContext::Client);
+        static DESCRIBED: SignalDesc = SignalDesc::new("Fired").describe("Text.");
+        static PLAIN_LIST: [&SignalDesc; 1] = [&PLAIN];
+        static OPEN_LIST: [&SignalDesc; 1] = [&OPEN];
+        static KEYED_LIST: [&SignalDesc; 1] = [&KEYED];
+        static SIDED_LIST: [&SignalDesc; 1] = [&SIDED];
+        static DESCRIBED_LIST: [&SignalDesc; 1] = [&DESCRIBED];
+        let hash = |signals| ok_hash(&[ClassDef::new("Fixture", None).signals(signals)]);
+        let original = hash(&PLAIN_LIST);
+        assert_ne!(original, hash(&OPEN_LIST));
+        assert_ne!(original, hash(&KEYED_LIST));
+        assert_ne!(original, hash(&SIDED_LIST));
+        assert_eq!(original, hash(&DESCRIBED_LIST));
     }
 
     #[test]

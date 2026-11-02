@@ -12,6 +12,7 @@ use super::cframe::{LuaCFrame, cframe};
 use super::datatypes::{LuaColor3, LuaUDim2, LuaVector3, color, udim2, vector};
 use super::enums::enum_item_ref;
 use super::instance::LuaInstance;
+use super::signals::LuaSignal;
 use super::{ApiState, lua_error};
 
 /// How deep a table argument may nest. A table that holds itself ends here, with an error.
@@ -176,6 +177,10 @@ impl ApiState {
                 Some(function) => Value::Function(function),
                 None => Value::Nil,
             },
+            ScriptValue::Signal(key) => Value::UserData(lua.create_userdata(LuaSignal {
+                state: self.clone(),
+                key,
+            })?),
             ScriptValue::Array(items) | ScriptValue::Tuple(items) => {
                 let table = lua.create_table_with_capacity(items.len(), 0)?;
                 for (index, item) in items.into_iter().enumerate() {

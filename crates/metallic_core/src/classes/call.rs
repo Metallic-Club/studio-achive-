@@ -31,9 +31,10 @@
 //! A method that needs the script host (fires a remote, calls back into script code, reads host
 //! state) is declared with [`MethodDesc::host`] and implemented in `metallic_script`; see
 //! [`HostMethods`](super::HostMethods). A method that parks its caller is declared with
-//! [`MethodDesc::yields`] and returns [`CallOutcome::Wait`].
+//! [`MethodDesc::yields`] and returns [`CallOutcome::Wait`]. A method fires a signal its class declares
+//! with [`MethodCall::fire`]; see "How to add a signal" in `ARCHITECTURE.md`.
 use super::desc::{ANY_FUNCTION, ArgCheck, MethodDesc, Ty};
-use super::resolve::MemberId;
+use super::resolve::{MemberId, MemberKind, Registry};
 use crate::cframe::CFrame;
 use crate::value::{Color3, UDim2, Value, ValueType, Vec3};
 use crate::{CoreError, InstanceId, World};
@@ -105,6 +106,8 @@ pub enum ScriptValue {
     Function(FunctionRef),
     /// Several results.
     Tuple(Vec<ScriptValue>),
+    /// A signal object: what a binding connects to. Returned by a method declared [`Ty::Signal`].
+    Signal(SignalKey),
 }
 
 /// 2^63: the first `f64` above the `i64` range, and the magnitude of its lowest value.
@@ -271,6 +274,7 @@ impl ScriptValue {
             ScriptValue::Map(_) => TypeName::Map,
             ScriptValue::Function(_) => TypeName::Function,
             ScriptValue::Tuple(_) => TypeName::Tuple,
+            ScriptValue::Signal(_) => TypeName::Signal,
         }
     }
 }
@@ -337,6 +341,12 @@ impl From<CFrame> for ScriptValue {
     }
 }
 
+impl From<SignalKey> for ScriptValue {
+    fn from(value: SignalKey) -> ScriptValue {
+        ScriptValue::Signal(value)
+    }
+}
+
 /// True when `value` is a valid `ty`. A destroyed instance is no instance; an `Int` is a `Number`;
 /// a `Number` is an `Int` only when whole and in range.
 pub fn conforms(world: &World, ty: &Ty, value: &ScriptValue) -> bool {
@@ -378,6 +388,7 @@ pub fn conforms(world: &World, ty: &Ty, value: &ScriptValue) -> bool {
             }
             _ => false,
         },
+        Ty::Signal => matches!(value, ScriptValue::Signal(_)),
     }
 }
 
@@ -477,15 +488,25 @@ pub struct CallContext {
     pub local_player: Option<InstanceId>,
 }
 
-/// What a signal is keyed by. Design section 6; #463 fires and delivers.
+/// A signal of a class: its member id. Class-relative like every member id, and the same in every
+/// subclass by the prefix rule, so a [`SignalKey`] needs nothing more to name it.
+pub type SignalId = MemberId;
+
+/// What a signal is keyed by. Design section 6.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SignalKey {
     /// The instance the signal belongs to.
     pub instance: InstanceId,
     /// The signal.
-    pub signal: MemberId,
-    /// 0, or an interned name id for a parameterized signal.
+    pub signal: SignalId,
+    /// 0, or an id naming what a parameterized signal is keyed by. See [`property_signal_arg`].
     pub arg: u32,
+}
+
+/// The [`SignalKey::arg`] of `Changed` for one property (`GetPropertyChangedSignal(name)`). The
+/// member id is the interned name: it is unique within the class, and 0 stays the signal itself.
+pub const fn property_signal_arg(property: MemberId) -> u32 {
+    property.0 as u32 + 1
 }
 
 /// What a parked thread waits for. The host resumes it with a [`ScriptValue`] when this is
@@ -550,6 +571,7 @@ pub struct MethodCall<'a> {
     pub context: &'a CallContext,
     class: &'static str,
     desc: &'static MethodDesc,
+    registry: &'a Registry,
 }
 
 /// [`MethodCall::arg`] of an argument that was left out.
@@ -589,12 +611,57 @@ impl<'a> MethodCall<'a> {
             context,
             class,
             desc,
+            registry: super::registry(),
         }
+    }
+
+    /// Looks members up in `registry` rather than the built-in classes.
+    pub fn in_registry(mut self, registry: &'a Registry) -> MethodCall<'a> {
+        self.registry = registry;
+        self
     }
 
     /// The class of the instance the method is called on.
     pub fn class_name(&self) -> &'static str {
         self.class
+    }
+
+    /// The key of this instance's signal `name`, with `arg` for a parameterized one.
+    pub fn signal(&self, name: &str, arg: u32) -> Result<SignalKey, ApiError> {
+        let class = self.registry.class_by_name(self.class);
+        let signal = class.and_then(|class| {
+            let id = class.member(name)?;
+            let member = class.members.get(usize::from(id.0))?;
+            (matches!(member.kind, MemberKind::Signal { .. }) && !member.hidden).then_some(id)
+        });
+        let Some(signal) = signal else {
+            let name = Cow::Owned(name.to_owned());
+            return Err(ApiError::new(self.class, name, ApiErrorKind::NotAMember));
+        };
+        Ok(SignalKey {
+            instance: self.this,
+            signal,
+            arg,
+        })
+    }
+
+    /// Fires this instance's signal `name`. Delivery is deferred to the next script host step, like
+    /// every signal, and costs one lookup when nobody listens. Errors when the class does not have
+    /// the signal.
+    pub fn fire(&mut self, name: &str, args: Vec<ScriptValue>) -> Result<(), ApiError> {
+        let key = self.signal(name, 0)?;
+        self.world.fire_key(key, args);
+        Ok(())
+    }
+
+    /// The [`SignalKey::arg`] of `Changed` for the property `name` of this instance's class.
+    /// `None` when the class has no such property, or does not show it to scripts.
+    pub fn property_signal_arg(&self, name: &str) -> Option<u32> {
+        let class = self.registry.class_by_name(self.class)?;
+        let id = class.member(name)?;
+        let member = class.members.get(usize::from(id.0))?;
+        (matches!(member.kind, MemberKind::Property { .. }) && !member.hidden)
+            .then_some(property_signal_arg(id))
     }
 
     /// The declaration being called.
@@ -693,6 +760,8 @@ pub enum TypeName {
     Function,
     /// `tuple`
     Tuple,
+    /// `RBXScriptSignal`
+    Signal,
 }
 
 impl fmt::Display for TypeName {
@@ -712,6 +781,7 @@ impl fmt::Display for TypeName {
             TypeName::Map => "map",
             TypeName::Function => "function",
             TypeName::Tuple => "tuple",
+            TypeName::Signal => "RBXScriptSignal",
         };
         f.write_str(name)
     }
@@ -736,6 +806,7 @@ impl fmt::Display for Ty {
             Ty::Function(_) => f.write_str("function"),
             Ty::Optional(inner) => write!(f, "{inner} or nil"),
             Ty::Tuple(_) => f.write_str("tuple"),
+            Ty::Signal => f.write_str("RBXScriptSignal"),
             Ty::Any => f.write_str("any"),
         }
     }

@@ -17,8 +17,8 @@ use metallic_core::{ChangeCursor, Changes, InstanceId, Value as CoreValue, World
 use mlua::Value;
 
 use crate::api::{
-    self, ApiState, BoundResult, EventKind, GuiEvent, HostShared, InputActionEvent, InputDevice,
-    InputValue, MAX_GUI_EVENTS_PER_STEP, RemoteTarget, TouchButtonInfo,
+    self, ApiState, BoundResult, GuiEvent, HostShared, InputActionEvent, InputDevice, InputValue,
+    MAX_GUI_EVENTS_PER_STEP, RemoteTarget, TouchButtonInfo,
 };
 use crate::debug::{Breakpoint, Debugger};
 use crate::vm::{
@@ -230,7 +230,7 @@ impl ScriptHost {
                 .map(|side| side.state.dispatch_budget())
                 .collect();
             self.deliver_player_added(player);
-            self.fire_instance_event(players, EventKind::PlayerRemoving, Some(player));
+            self.fire_instance_event(players, "PlayerRemoving", Some(player));
         }
         self.players.remove(&player);
         self.shared.joined.borrow_mut().remove(&player);
@@ -440,7 +440,9 @@ impl ScriptHost {
     }
 
     /// Advances the scripts to time `now` (seconds). In this order: starts scripts that
-    /// appeared since the last step, delivers the queued remotes and inputs, fires
+    /// appeared since the last step, delivers the queued remotes and inputs and the signals core
+    /// code fired through [`World::fire`], fires the property-changed signals (`Changed`,
+    /// `GetPropertyChangedSignal`) for changes since the last step, fires
     /// `RunService.Heartbeat(dt)`, then resumes `WaitForChild` and `task.wait` threads.
     /// Does nothing before `start`.
     /// Client hosts postpone the whole step if the World cannot be read for ownership
@@ -486,6 +488,11 @@ impl ScriptHost {
             world.trim_tag_log(&tag_cursors);
         }
         self.deliver_gui_events();
+        // Property changes since the last step, Rust and script writes alike. Changes made by
+        // these handlers (or by Heartbeat below) fire on the next step.
+        for side in self.sides() {
+            side.state.deliver_property_changes();
+        }
 
         let run_service = self
             .world
@@ -494,9 +501,9 @@ impl ScriptHost {
             .and_then(|w| w.root("RunService"));
         if let Some(run_service) = run_service {
             for side in self.sides() {
-                side.state.fire((run_service, EventKind::Heartbeat), &|_| {
-                    Ok(vec![Value::Number(dt)])
-                });
+                if let Some(key) = side.state.signal_key(run_service, "Heartbeat") {
+                    side.state.fire(key, &|_| Ok(vec![Value::Number(dt)]));
+                }
             }
         }
         for side in self.sides() {
@@ -521,6 +528,7 @@ impl ScriptHost {
             .into_iter()
             .flatten()
         {
+            side.state.unpublish_signals();
             side.vm.shutdown();
         }
         self.inputs.clear();
@@ -635,6 +643,23 @@ impl ScriptHost {
     #[doc(hidden)]
     pub fn dispatch_args_built(&self) -> u64 {
         self.sides().iter().map(|s| s.state.args_built()).sum()
+    }
+
+    /// How many threads wait in `signal:Wait()` right now (both VMs). A test hook that shows
+    /// stopped scripts and destroyed instances leave no waiter behind.
+    #[doc(hidden)]
+    pub fn signal_waiters(&self) -> usize {
+        self.sides().iter().map(|s| s.state.signal_waiters()).sum()
+    }
+
+    /// How many world-journal entries property-changed delivery has read so far (both VMs).
+    /// A test hook: it stays 0 while no script listens to any instance's `Changed`.
+    #[doc(hidden)]
+    pub fn property_changes_scanned(&self) -> u64 {
+        self.sides()
+            .iter()
+            .map(|s| s.state.property_changes_scanned())
+            .sum()
     }
 
     pub(crate) fn sides(&self) -> Vec<&Side> {
@@ -932,7 +957,7 @@ impl ScriptHost {
         for input in std::mem::take(&mut self.inputs) {
             match input {
                 HostEvent::Touched { part, hit } => {
-                    self.fire_instance_event(part, EventKind::Touched, Some(hit));
+                    self.fire_instance_event(part, "Touched", Some(hit));
                 }
                 HostEvent::TouchEnded { part, hit } => {
                     // The touching part may be gone already (its character was destroyed or
@@ -941,14 +966,36 @@ impl ScriptHost {
                     self.fire_touch_ended(part, hit);
                 }
                 HostEvent::Died { humanoid } => {
-                    self.fire_instance_event(humanoid, EventKind::Died, None);
+                    self.fire_instance_event(humanoid, "Died", None);
                 }
                 HostEvent::CharacterAdded { player, model } => {
-                    self.fire_instance_event(player, EventKind::CharacterAdded, Some(model));
+                    self.fire_instance_event(player, "CharacterAdded", Some(model));
                 }
                 HostEvent::PlayerAdded { player } => {
                     self.deliver_player_added(player);
                 }
+            }
+        }
+        self.deliver_world_signals();
+    }
+
+    /// Delivers what core code fired through [`World::fire`] since the last step, to every VM.
+    fn deliver_world_signals(&mut self) {
+        let (queued, dropped) = match self.world.try_borrow_mut() {
+            Ok(mut world) => {
+                let signals = world.signals_mut();
+                (signals.take(), signals.take_dropped())
+            }
+            Err(_) => return,
+        };
+        if dropped > 0 {
+            self.output.warn(&format!(
+                "{dropped} signal fires were dropped: too many between two steps"
+            ));
+        }
+        for signal in &queued {
+            for side in self.sides() {
+                side.state.deliver_signal(signal);
             }
         }
     }
@@ -962,14 +1009,14 @@ impl ScriptHost {
         if let Some(players) = players {
             let first = self.shared.joined.borrow_mut().insert(player);
             if first {
-                self.fire_instance_event(players, EventKind::PlayerAdded, Some(player));
+                self.fire_instance_event(players, "PlayerAdded", Some(player));
             }
         }
     }
 
-    /// Fires `event` of `source` with an optional instance argument in active VMs. Dropped
-    /// when either instance no longer exists.
-    fn fire_instance_event(&self, source: InstanceId, event: EventKind, arg: Option<InstanceId>) {
+    /// Fires the signal `event` of `source` with an optional instance argument in active VMs.
+    /// Dropped when either instance no longer exists, or the class of `source` has no such signal.
+    fn fire_instance_event(&self, source: InstanceId, event: &str, arg: Option<InstanceId>) {
         let alive = self
             .world
             .try_borrow()
@@ -979,7 +1026,10 @@ impl ScriptHost {
         }
         for side in self.sides() {
             let state = &side.state;
-            state.fire((source, event), &|lua| match arg {
+            let Some(key) = state.signal_key(source, event) else {
+                continue;
+            };
+            state.fire(key, &|lua| match arg {
                 Some(id) => Ok(vec![Value::UserData(state.wrap(lua, id)?)]),
                 None => Ok(Vec::new()),
             });
@@ -995,9 +1045,10 @@ impl ScriptHost {
         }
         for side in self.sides() {
             let state = &side.state;
-            state.fire((part, EventKind::TouchEnded), &|lua| {
-                Ok(vec![Value::UserData(state.wrap(lua, hit)?)])
-            });
+            let Some(key) = state.signal_key(part, "TouchEnded") else {
+                continue;
+            };
+            state.fire(key, &|lua| Ok(vec![Value::UserData(state.wrap(lua, hit)?)]));
         }
     }
 

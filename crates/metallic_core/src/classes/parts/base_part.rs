@@ -21,6 +21,13 @@ pub const MATERIAL: EnumDesc = EnumDesc::new(
 /// Shapes a part may have (`Enum.PartType`, the name scripts know; the property stays `Shape`).
 const SHAPE: EnumDesc = EnumDesc::new("PartType", &["Block", "Ball", "Cylinder", "Wedge"]);
 
+static TOUCHED: SignalDesc = SignalDesc::new("Touched")
+    .params(&[Param::new("hit", Ty::Instance(Some("BasePart")))])
+    .describe("Another part started touching this one.");
+static TOUCH_ENDED: SignalDesc = SignalDesc::new("TouchEnded")
+    .params(&[Param::new("hit", Ty::Instance(Some("BasePart")))])
+    .describe("Another part stopped touching this one; it may have been destroyed by then.");
+
 pub static CLASS: ClassDesc = ClassDesc::new("BasePart", Some("PVInstance"))
     .flags(ClassFlags::ABSTRACT)
     .category("Parts")
@@ -65,4 +72,5 @@ pub static CLASS: ClassDesc = ClassDesc::new("BasePart", Some("PVInstance"))
         })
         .describe("Where the part's pivot sits, relative to its centre."),
         look_override(),
-    ]);
+    ])
+    .signals(&[&TOUCHED, &TOUCH_ENDED]);
