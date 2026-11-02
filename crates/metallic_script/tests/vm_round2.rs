@@ -45,52 +45,53 @@ fn strict_vm() -> (ScriptVm, Rc<Capture>) {
 
 #[test]
 fn single_quantifier_pathological_find_times_out_or_errors_fast() {
-common::real_limits_test(|| {
-    let (mut vm, _) = strict_vm();
-    let start = Instant::now();
-    for src in [
-        "string.find(string.rep('a', 1e6), '.-b')",
-        "string.match(string.rep('a', 1e6), '.*b')",
-        "string.gsub(string.rep('a', 1e6), '.-b', 'x')",
-        "for _ in string.gmatch(string.rep('a', 1e6), '.-b') do end",
-        "string.find(string.rep('a', 100000), 'a-a-a-a-a-b')",
-    ] {
-        let err = vm.run_script("T", src).unwrap_err();
-        assert!(err.message.starts_with("T:1:"), "{src}: {}", err.message);
+    common::real_limits_test(|| {
+        let (mut vm, _) = strict_vm();
+        let start = Instant::now();
+        for src in [
+            "string.find(string.rep('a', 1e6), '.-b')",
+            "string.match(string.rep('a', 1e6), '.*b')",
+            "string.gsub(string.rep('a', 1e6), '.-b', 'x')",
+            "for _ in string.gmatch(string.rep('a', 1e6), '.-b') do end",
+            "string.find(string.rep('a', 100000), 'a-a-a-a-a-b')",
+        ] {
+            let err = vm.run_script("T", src).unwrap_err();
+            assert!(err.message.starts_with("T:1:"), "{src}: {}", err.message);
+            assert!(
+                err.message.contains("pattern too complex")
+                    || err.message.contains("Script timeout"),
+                "{src}: {}",
+                err.message
+            );
+        }
         assert!(
-            err.message.contains("pattern too complex") || err.message.contains("Script timeout"),
-            "{src}: {}",
-            err.message
+            start.elapsed() < Duration::from_secs(1),
+            "{:?}",
+            start.elapsed()
         );
-    }
-    assert!(
-        start.elapsed() < Duration::from_secs(1),
-        "{:?}",
-        start.elapsed()
-    );
-    vm.run_script("T", "print('alive')").unwrap();
-});
+        vm.run_script("T", "print('alive')").unwrap();
+    });
 }
 
 #[test]
 fn trim_pattern_on_100kb_works() {
-common::real_limits_test(|| {
-    let (mut vm, _) = vm();
-    let start = Instant::now();
-    vm.run_script(
-        "T",
-        "local s = '  ' .. string.rep('x', 100000) .. '  '
+    common::real_limits_test(|| {
+        let (mut vm, _) = vm();
+        let start = Instant::now();
+        vm.run_script(
+            "T",
+            "local s = '  ' .. string.rep('x', 100000) .. '  '
          assert(#string.match(s, '^%s*(.-)%s*$') == 100000)
          assert(#string.gsub(s, '^%s+', '') == 100002)
          assert(string.find(s, 'x+') == 3)",
-    )
-    .unwrap();
-    assert!(
-        start.elapsed() < Duration::from_secs(1),
-        "{:?}",
-        start.elapsed()
-    );
-});
+        )
+        .unwrap();
+        assert!(
+            start.elapsed() < Duration::from_secs(1),
+            "{:?}",
+            start.elapsed()
+        );
+    });
 }
 
 #[test]
@@ -180,29 +181,29 @@ fn pattern_results_match_luau_for_common_cases() {
 
 #[test]
 fn string_rep_with_string_count_is_bounded() {
-common::real_limits_test(|| {
-    let (mut vm, _) = vm();
-    let start = Instant::now();
-    let err = vm
-        .run_script("T", "string.rep('x', '100000000')")
-        .unwrap_err();
-    assert!(
-        err.message.starts_with("T:1:") && err.message.contains("too large"),
-        "{}",
-        err.message
-    );
-    assert!(
-        vm.run_script("T", "string.rep(12345, '100000000')")
-            .is_err()
-    );
-    assert!(vm.run_script("T", "('x'):rep(1e300)").is_err());
-    vm.run_script(
-        "T",
-        "assert(('x'):rep('3') == 'xxx' and string.rep('ab', 2) == 'abab')",
-    )
-    .unwrap();
-    assert!(start.elapsed() < Duration::from_secs(1));
-});
+    common::real_limits_test(|| {
+        let (mut vm, _) = vm();
+        let start = Instant::now();
+        let err = vm
+            .run_script("T", "string.rep('x', '100000000')")
+            .unwrap_err();
+        assert!(
+            err.message.starts_with("T:1:") && err.message.contains("too large"),
+            "{}",
+            err.message
+        );
+        assert!(
+            vm.run_script("T", "string.rep(12345, '100000000')")
+                .is_err()
+        );
+        assert!(vm.run_script("T", "('x'):rep(1e300)").is_err());
+        vm.run_script(
+            "T",
+            "assert(('x'):rep('3') == 'xxx' and string.rep('ab', 2) == 'abab')",
+        )
+        .unwrap();
+        assert!(start.elapsed() < Duration::from_secs(1));
+    });
 }
 
 struct DropSink(Rc<RefCell<u32>>);
@@ -252,52 +253,52 @@ fn budget_errors_cleanly_when_vm_is_gone() {
 
 #[test]
 fn timeout_reported_once() {
-common::real_limits_test(|| {
-    let (mut vm, sink) = strict_vm();
-    // A spawned thread times out inside run_script: one error, returned, none in the sink.
-    let err = vm
-        .run_script("T", "task.spawn(function() while true do end end)")
-        .unwrap_err();
-    assert!(err.message.contains("Script timeout"), "{}", err.message);
-    assert!(sink.lines.borrow().is_empty(), "{:?}", sink.lines.borrow());
-    // In a stepped thread: exactly one sink line.
-    vm.run_script(
-        "U",
-        "task.delay(1, function() task.spawn(function() while true do end end) end)",
-    )
-    .unwrap();
-    vm.step(2.0);
-    assert_eq!(sink.lines.borrow().len(), 1, "{:?}", sink.lines.borrow());
-    sink.lines.borrow_mut().clear();
-    // A pcall-caught timeout followed by a yield is reported once and the thread is dropped.
-    vm.run_script(
+    common::real_limits_test(|| {
+        let (mut vm, sink) = strict_vm();
+        // A spawned thread times out inside run_script: one error, returned, none in the sink.
+        let err = vm
+            .run_script("T", "task.spawn(function() while true do end end)")
+            .unwrap_err();
+        assert!(err.message.contains("Script timeout"), "{}", err.message);
+        assert!(sink.lines.borrow().is_empty(), "{:?}", sink.lines.borrow());
+        // In a stepped thread: exactly one sink line.
+        vm.run_script(
+            "U",
+            "task.delay(1, function() task.spawn(function() while true do end end) end)",
+        )
+        .unwrap();
+        vm.step(2.0);
+        assert_eq!(sink.lines.borrow().len(), 1, "{:?}", sink.lines.borrow());
+        sink.lines.borrow_mut().clear();
+        // A pcall-caught timeout followed by a yield is reported once and the thread is dropped.
+        vm.run_script(
         "V",
         "task.delay(1, function() pcall(function() while true do end end) task.wait(1) print('after') end)",
     )
     .unwrap();
-    vm.step(3.0);
-    vm.step(10.0);
-    assert_eq!(sink.lines.borrow().len(), 1, "{:?}", sink.lines.borrow());
-    assert!(sink.lines.borrow()[0].starts_with("error:V:1: Script timeout"));
-});
+        vm.step(3.0);
+        vm.step(10.0);
+        assert_eq!(sink.lines.borrow().len(), 1, "{:?}", sink.lines.borrow());
+        assert!(sink.lines.borrow()[0].starts_with("error:V:1: Script timeout"));
+    });
 }
 
 /// Runs `src` and asserts it stops with a pattern/timeout error within 0.5 s (#166).
 fn assert_pattern_stops_fast(src: &str) {
-common::real_limits_test(|| {
-    let (mut vm, _) = strict_vm();
-    let start = Instant::now();
-    let err = vm.run_script("T", src).unwrap_err();
-    let took = start.elapsed();
-    assert!(
-        err.message.contains("pattern too complex") || err.message.contains("Script timeout"),
-        "{}",
-        err.message
-    );
-    assert!(took < Duration::from_secs(5), "took {took:?}");
-    vm.run_script("T", "assert(string.match('abc', '[a-c]+') == 'abc')")
-        .unwrap();
-});
+    common::real_limits_test(|| {
+        let (mut vm, _) = strict_vm();
+        let start = Instant::now();
+        let err = vm.run_script("T", src).unwrap_err();
+        let took = start.elapsed();
+        assert!(
+            err.message.contains("pattern too complex") || err.message.contains("Script timeout"),
+            "{}",
+            err.message
+        );
+        assert!(took < Duration::from_secs(5), "took {took:?}");
+        vm.run_script("T", "assert(string.match('abc', '[a-c]+') == 'abc')")
+            .unwrap();
+    });
 }
 
 #[test]
@@ -358,17 +359,17 @@ fn assert_stops_early(build: &str, src: &str, min_plain: Duration) {
 
 #[test]
 fn big_string_sort_with_shared_prefix_is_interruptible() {
-common::real_limits_test(|| {
-    // Every comparison is a long memcmp in C.
-    assert_stops_early(
-        "local p = string.rep('a', 1500)
+    common::real_limits_test(|| {
+        // Every comparison is a long memcmp in C.
+        assert_stops_early(
+            "local p = string.rep('a', 1500)
          local big = {}
          for i = 1, 150000 do big[i] = p .. ((i * 7919) % 150001) end
          return big",
-        "table.sort(big)",
-        Duration::from_millis(150),
-    );
-});
+            "table.sort(big)",
+            Duration::from_millis(150),
+        );
+    });
 }
 
 #[test]
@@ -395,75 +396,75 @@ fn big_sort_with_a_c_lt_metamethod_is_interruptible() {
 
 #[test]
 fn huge_number_sort_without_comparator_is_interruptible() {
-common::real_limits_test(|| {
-    // Above the C-sort cap numbers also go through the Lua closure.
-    let (mut vm, _) = vm();
-    let big: mlua::Table = vm
+    common::real_limits_test(|| {
+        // Above the C-sort cap numbers also go through the Lua closure.
+        let (mut vm, _) = vm();
+        let big: mlua::Table = vm
         .lua()
         .load("local big = table.create(2000000, 0) for i = 1, 2000000 do big[i] = (i * 7919) % 2000003 end return big")
         .eval()
         .unwrap();
-    vm.set_global("big", big).unwrap();
-    vm.set_resume_budget(Duration::from_millis(40));
-    let start = Instant::now();
-    let err = vm.run_script("T", "table.sort(big)").unwrap_err();
-    assert!(err.message.contains("Script timeout"), "{}", err.message);
-    assert!(
-        start.elapsed() < Duration::from_secs(2),
-        "{:?}",
-        start.elapsed()
-    );
-});
+        vm.set_global("big", big).unwrap();
+        vm.set_resume_budget(Duration::from_millis(40));
+        let start = Instant::now();
+        let err = vm.run_script("T", "table.sort(big)").unwrap_err();
+        assert!(err.message.contains("Script timeout"), "{}", err.message);
+        assert!(
+            start.elapsed() < Duration::from_secs(2),
+            "{:?}",
+            start.elapsed()
+        );
+    });
 }
 
 #[test]
 fn big_sort_with_a_lua_comparator_stays_interruptible() {
-common::real_limits_test(|| {
-    let (mut vm, _) = vm();
-    let big: mlua::Table = vm
-        .lua()
-        .load("return table.create(300000, 1)")
-        .eval()
-        .unwrap();
-    vm.set_global("big", big).unwrap();
-    vm.set_resume_budget(Duration::from_millis(40));
-    let start = Instant::now();
-    let err = vm
-        .run_script("T", "table.sort(big, function(a, b) while true do end end)")
-        .unwrap_err();
-    assert!(err.message.contains("Script timeout"), "{}", err.message);
-    assert!(
-        start.elapsed() < Duration::from_secs(2),
-        "{:?}",
-        start.elapsed()
-    );
-});
+    common::real_limits_test(|| {
+        let (mut vm, _) = vm();
+        let big: mlua::Table = vm
+            .lua()
+            .load("return table.create(300000, 1)")
+            .eval()
+            .unwrap();
+        vm.set_global("big", big).unwrap();
+        vm.set_resume_budget(Duration::from_millis(40));
+        let start = Instant::now();
+        let err = vm
+            .run_script("T", "table.sort(big, function(a, b) while true do end end)")
+            .unwrap_err();
+        assert!(err.message.contains("Script timeout"), "{}", err.message);
+        assert!(
+            start.elapsed() < Duration::from_secs(2),
+            "{:?}",
+            start.elapsed()
+        );
+    });
 }
 
 #[test]
 fn sorting_200k_numbers_without_a_comparator_fits_the_default_budget() {
-common::real_limits_test(|| {
-    let (mut vm, _) = vm();
-    let big: mlua::Table = vm
+    common::real_limits_test(|| {
+        let (mut vm, _) = vm();
+        let big: mlua::Table = vm
         .lua()
         .load("local t = table.create(200000, 0) for i = 1, 200000 do t[i] = (i * 7919) % 200003 end return t")
         .eval()
         .unwrap();
-    vm.set_global("big", big).unwrap();
-    // The sort alone must fit a 1 s budget (the default is 0.1 s; loaded CI machines need slack):
-    // it runs in C for numbers, not through 3.4M Lua calls.
-    vm.set_resume_budget(Duration::from_secs(1));
-    let start = Instant::now();
-    vm.run_script("T", "table.sort(big)").unwrap();
-    assert!(
-        start.elapsed() < Duration::from_secs(1),
-        "{:?}",
-        start.elapsed()
-    );
-    vm.set_resume_budget(Duration::from_secs(5));
-    vm.run_script("T", "for i = 2, 200000 do assert(big[i - 1] <= big[i]) end")
-        .unwrap();
-});
+        vm.set_global("big", big).unwrap();
+        // The sort alone must fit a 1 s budget (the default is 0.1 s; loaded CI machines need slack):
+        // it runs in C for numbers, not through 3.4M Lua calls.
+        vm.set_resume_budget(Duration::from_secs(1));
+        let start = Instant::now();
+        vm.run_script("T", "table.sort(big)").unwrap();
+        assert!(
+            start.elapsed() < Duration::from_secs(1),
+            "{:?}",
+            start.elapsed()
+        );
+        vm.set_resume_budget(Duration::from_secs(5));
+        vm.run_script("T", "for i = 2, 200000 do assert(big[i - 1] <= big[i]) end")
+            .unwrap();
+    });
 }
 
 #[test]
@@ -513,30 +514,30 @@ fn normal_sorts_behave_as_before() {
 
 #[test]
 fn gsub_replacement_loop_is_bounded() {
-common::real_limits_test(|| {
-    // 1M empty matches x 64 bytes: ~64 MB appended, about 10 s unbounded in a debug build.
-    let (mut vm, _) = strict_vm();
-    let start = Instant::now();
-    let err = vm
-        .run_script(
-            "T",
-            "local s = string.rep('a', 1000000)
+    common::real_limits_test(|| {
+        // 1M empty matches x 64 bytes: ~64 MB appended, about 10 s unbounded in a debug build.
+        let (mut vm, _) = strict_vm();
+        let start = Instant::now();
+        let err = vm
+            .run_script(
+                "T",
+                "local s = string.rep('a', 1000000)
              string.gsub(s, '', string.rep('x', 64))",
-        )
-        .unwrap_err();
-    assert!(
-        err.message.contains("Script timeout") || err.message.contains("pattern too complex"),
-        "{}",
-        err.message
-    );
-    assert!(
-        start.elapsed() < Duration::from_secs(5),
-        "{:?}",
-        start.elapsed()
-    );
-    vm.run_script("T", "assert(string.gsub('abc', '', '-') == '-a-b-c-')")
-        .unwrap();
-});
+            )
+            .unwrap_err();
+        assert!(
+            err.message.contains("Script timeout") || err.message.contains("pattern too complex"),
+            "{}",
+            err.message
+        );
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            start.elapsed()
+        );
+        vm.run_script("T", "assert(string.gsub('abc', '', '-') == '-a-b-c-')")
+            .unwrap();
+    });
 }
 
 #[test]
@@ -549,29 +550,29 @@ fn back_reference_compares_are_charged() {
 
 #[test]
 fn gsub_charges_replacement_bytes_scanned_not_only_appended() {
-common::real_limits_test(|| {
-    // '%0' on matches that are all empty appends nothing, yet the 64 MB replacement is walked
-    // for every match: 20 matches x 64M bytes.
-    let (mut vm, _) = strict_vm();
-    let start = Instant::now();
-    let err = vm
-        .run_script(
-            "T",
-            "local r = string.rep('%0', 32000000)
+    common::real_limits_test(|| {
+        // '%0' on matches that are all empty appends nothing, yet the 64 MB replacement is walked
+        // for every match: 20 matches x 64M bytes.
+        let (mut vm, _) = strict_vm();
+        let start = Instant::now();
+        let err = vm
+            .run_script(
+                "T",
+                "local r = string.rep('%0', 32000000)
              string.gsub(string.rep('a', 20), '', r)",
-        )
-        .unwrap_err();
-    assert!(
-        err.message.contains("Script timeout") || err.message.contains("pattern too complex"),
-        "{}",
-        err.message
-    );
-    assert!(
-        start.elapsed() < Duration::from_secs(2),
-        "{:?}",
-        start.elapsed()
-    );
-});
+            )
+            .unwrap_err();
+        assert!(
+            err.message.contains("Script timeout") || err.message.contains("pattern too complex"),
+            "{}",
+            err.message
+        );
+        assert!(
+            start.elapsed() < Duration::from_secs(2),
+            "{:?}",
+            start.elapsed()
+        );
+    });
 }
 
 // ---- #344: the remaining unbounded C calls ----
@@ -773,75 +774,75 @@ fn concat_chunk_boundaries_join_correctly() {
 
 #[test]
 fn huge_pack_formats_are_refused() {
-common::real_limits_test(|| {
-    let (mut vm, _) = vm();
-    vm.set_resume_budget(Duration::from_secs(5));
-    let start = Instant::now();
-    for call in ["pack(f)", "packsize(f)", "unpack(f, 'abc')"] {
-        let err = vm
-            .run_script(
-                "T",
-                &format!("local f = string.rep('x', 64 * 1024 * 1024) string.{call}"),
-            )
-            .unwrap_err();
+    common::real_limits_test(|| {
+        let (mut vm, _) = vm();
+        vm.set_resume_budget(Duration::from_secs(5));
+        let start = Instant::now();
+        for call in ["pack(f)", "packsize(f)", "unpack(f, 'abc')"] {
+            let err = vm
+                .run_script(
+                    "T",
+                    &format!("local f = string.rep('x', 64 * 1024 * 1024) string.{call}"),
+                )
+                .unwrap_err();
+            assert!(
+                err.message.contains("format string too long"),
+                "{call}: {}",
+                err.message
+            );
+        }
         assert!(
-            err.message.contains("format string too long"),
-            "{call}: {}",
-            err.message
+            start.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            start.elapsed()
         );
-    }
-    assert!(
-        start.elapsed() < Duration::from_secs(5),
-        "{:?}",
-        start.elapsed()
-    );
-    // A short format with a huge item size: the padding would run until memory ran out.
-    // Each item is small, the total is not: 300 x c999999 padded until memory ran out.
-    for fmt in [
-        "c200000000".to_string(),
-        "<i4 c99999999".to_string(),
-        "c999999".repeat(300),
-        "c9999999".repeat(2),
-        "c99999999999999999999".to_string(),
-    ] {
-        let err = vm
-            .run_script("T", &format!("string.pack('{fmt}', 1, '')"))
-            .unwrap_err();
-        assert!(
-            err.message.contains("result too large"),
-            "{}: {}",
-            &fmt[..fmt.len().min(30)],
-            err.message
-        );
-    }
-    vm.run_script(
+        // A short format with a huge item size: the padding would run until memory ran out.
+        // Each item is small, the total is not: 300 x c999999 padded until memory ran out.
+        for fmt in [
+            "c200000000".to_string(),
+            "<i4 c99999999".to_string(),
+            "c999999".repeat(300),
+            "c9999999".repeat(2),
+            "c99999999999999999999".to_string(),
+        ] {
+            let err = vm
+                .run_script("T", &format!("string.pack('{fmt}', 1, '')"))
+                .unwrap_err();
+            assert!(
+                err.message.contains("result too large"),
+                "{}: {}",
+                &fmt[..fmt.len().min(30)],
+                err.message
+            );
+        }
+        vm.run_script(
         "T",
         "assert(#string.pack('c999999', 'x') == 999999)
          assert(#string.pack(string.rep('c999999', 10), 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j') == 9999990)",
     )
     .unwrap();
-    vm.run_script(
-        "T",
-        "local p = string.pack('<i4 z s2', 7, 'hi', 'abc')
+        vm.run_script(
+            "T",
+            "local p = string.pack('<i4 z s2', 7, 'hi', 'abc')
          local a, b, c = string.unpack('<i4 z s2', p)
          assert(a == 7 and b == 'hi' and c == 'abc')
          assert(string.packsize('<i4 i8') == 12)
          local big = string.rep('i1', 30000)
          assert(string.packsize(big) == 30000)",
-    )
-    .unwrap();
-});
+        )
+        .unwrap();
+    });
 }
 
 #[test]
 fn huge_strings_are_refused_by_whole_string_passes() {
-common::real_limits_test(|| {
-    let (mut vm, _) = vm();
-    vm.set_resume_budget(Duration::from_secs(5));
-    let start = Instant::now();
-    vm.run_script(
-        "T",
-        "local s = string.rep('a', 16777217)
+    common::real_limits_test(|| {
+        let (mut vm, _) = vm();
+        vm.set_resume_budget(Duration::from_secs(5));
+        let start = Instant::now();
+        vm.run_script(
+            "T",
+            "local s = string.rep('a', 16777217)
          for _, name in {'upper', 'lower', 'reverse'} do
              local ok, e = pcall(string[name], s)
              assert(not ok and e:find('string too long'), name)
@@ -852,50 +853,50 @@ common::real_limits_test(|| {
          assert(not ok and e:find('string too long'))
          local ok3, e3 = pcall(utf8.offset, s, 5)
          assert(not ok3 and e3:find('string too long'))",
-    )
-    .unwrap();
-    assert!(
-        start.elapsed() < Duration::from_secs(5),
-        "{:?}",
-        start.elapsed()
-    );
-    vm.run_script(
-        "T",
-        "local s = string.rep('aB', 1000)
+        )
+        .unwrap();
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            start.elapsed()
+        );
+        vm.run_script(
+            "T",
+            "local s = string.rep('aB', 1000)
          assert(s:upper() == string.rep('AB', 1000) and s:lower() == string.rep('ab', 1000))
          assert(s:reverse() == string.rep('Ba', 1000))
          assert(utf8.len('h\u{e9}llo') == 5 and utf8.len('abc', 2) == 2)
          assert(utf8.len('\\xff') == nil)
          assert(string.upper(5) == '5')",
-    )
-    .unwrap();
-});
+        )
+        .unwrap();
+    });
 }
 
 #[test]
 fn huge_split_subjects_are_refused() {
-common::real_limits_test(|| {
-    let (mut vm, _) = vm();
-    vm.set_resume_budget(Duration::from_secs(5));
-    let start = Instant::now();
-    let err = vm
-        .run_script(
+    common::real_limits_test(|| {
+        let (mut vm, _) = vm();
+        vm.set_resume_budget(Duration::from_secs(5));
+        let start = Instant::now();
+        let err = vm
+            .run_script(
+                "T",
+                "local s = string.rep('a,', 2200000) string.split(s, ',')",
+            )
+            .unwrap_err();
+        assert!(err.message.contains("string too long"), "{}", err.message);
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            start.elapsed()
+        );
+        vm.run_script(
             "T",
-            "local s = string.rep('a,', 2200000) string.split(s, ',')",
-        )
-        .unwrap_err();
-    assert!(err.message.contains("string too long"), "{}", err.message);
-    assert!(
-        start.elapsed() < Duration::from_secs(5),
-        "{:?}",
-        start.elapsed()
-    );
-    vm.run_script(
-        "T",
-        "local parts = string.split('a,b,,c', ',')
+            "local parts = string.split('a,b,,c', ',')
          assert(#parts == 4 and parts[1] == 'a' and parts[3] == '' and parts[4] == 'c')
          assert(#string.split(string.rep('x,', 400000), ',') == 400001)",
-    )
-    .unwrap();
-});
+        )
+        .unwrap();
+    });
 }

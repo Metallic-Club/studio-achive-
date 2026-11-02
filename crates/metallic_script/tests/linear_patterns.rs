@@ -254,33 +254,33 @@ fn empty_matches_and_iterator_boundaries_keep_native_luau_results() {
 
 #[test]
 fn many_short_attempts_time_out_stickily_and_the_next_call_recovers() {
-common::real_limits_test(|| {
-    let mut vm = ScriptVm::new(Context::Server).unwrap();
-    vm.set_global(
-        "subject",
-        vm.lua().create_string(vec![b'a'; 32_000_000]).unwrap(),
-    )
-    .unwrap();
-    let start = Instant::now();
-    let error = vm
-        .run_script(
-            "ShortAttempts",
-            "local ok=pcall(string.match,subject,'x?x?x?x?x?x?x?x?z') return ok",
+    common::real_limits_test(|| {
+        let mut vm = ScriptVm::new(Context::Server).unwrap();
+        vm.set_global(
+            "subject",
+            vm.lua().create_string(vec![b'a'; 32_000_000]).unwrap(),
         )
-        .unwrap_err();
-    assert!(
-        error.message.contains("Script timeout"),
-        "{}",
-        error.message
-    );
-    assert!(
-        start.elapsed() < Duration::from_secs(1),
-        "{:?}",
-        start.elapsed()
-    );
-    vm.run_script("Healthy", "assert(string.match('abc','b') == 'b')")
         .unwrap();
-});
+        let start = Instant::now();
+        let error = vm
+            .run_script(
+                "ShortAttempts",
+                "local ok=pcall(string.match,subject,'x?x?x?x?x?x?x?x?z') return ok",
+            )
+            .unwrap_err();
+        assert!(
+            error.message.contains("Script timeout"),
+            "{}",
+            error.message
+        );
+        assert!(
+            start.elapsed() < Duration::from_secs(1),
+            "{:?}",
+            start.elapsed()
+        );
+        vm.run_script("Healthy", "assert(string.match('abc','b') == 'b')")
+            .unwrap();
+    });
 }
 
 #[test]

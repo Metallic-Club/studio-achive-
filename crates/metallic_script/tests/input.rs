@@ -743,37 +743,37 @@ fn the_event_queue_is_bounded() {
 
 #[test]
 fn a_spinning_input_handler_times_out_and_others_still_run() {
-common::real_limits_test(|| {
-    let (mut rig, dash) = input_rig();
-    rig.host.set_resume_budget(metallic_script::RESUME_BUDGET);
-    rig.local_script(
-        "Spinner",
-        r#"
+    common::real_limits_test(|| {
+        let (mut rig, dash) = input_rig();
+        rig.host.set_resume_budget(metallic_script::RESUME_BUDGET);
+        rig.local_script(
+            "Spinner",
+            r#"
         local dash = game:GetService("ReplicatedStorage"):WaitForChild("Input").Gameplay.Dash
         dash.Triggered:Connect(function() while true do end end)
         "#,
-    );
-    rig.local_script(
-        "Other",
-        r#"
+        );
+        rig.local_script(
+            "Other",
+            r#"
         local dash = game:GetService("ReplicatedStorage"):WaitForChild("Input").Gameplay.Dash
         dash.Triggered:Connect(function() print("other") end)
         "#,
-    );
-    rig.host.start().unwrap();
-    rig.host.input_action_event(trigger(dash, 0.1));
-    let began = std::time::Instant::now();
-    rig.run(0.0, 3);
-    let lines = rig.lines();
-    assert!(
-        lines
-            .iter()
-            .any(|l| l.starts_with("error:") && l.contains("Script timeout")),
-        "{lines:?}"
-    );
-    assert!(lines.contains(&"print:other".to_string()), "{lines:?}");
-    assert!(began.elapsed().as_secs_f64() < 1.0, "bounded by the budget");
-});
+        );
+        rig.host.start().unwrap();
+        rig.host.input_action_event(trigger(dash, 0.1));
+        let began = std::time::Instant::now();
+        rig.run(0.0, 3);
+        let lines = rig.lines();
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.starts_with("error:") && l.contains("Script timeout")),
+            "{lines:?}"
+        );
+        assert!(lines.contains(&"print:other".to_string()), "{lines:?}");
+        assert!(began.elapsed().as_secs_f64() < 1.0, "bounded by the budget");
+    });
 }
 
 fn descendant_count(rig: &Rig) -> usize {

@@ -644,137 +644,137 @@ end)
 
 #[test]
 fn synchronous_removal_uses_one_aggregate_budget_for_independent_owners() {
-common::real_limits_test(|| {
-    let mut rig = rig(ScriptRole::Server);
-    rig.host
-        .set_step_budget_sec(metallic_script::STEP_BUDGET_SEC);
-    for index in 0..8 {
-        rig.server_script(&format!("Owner{index}"), SLOW_REMOVING_HANDLER);
-    }
-    let local = player(&rig, "Local");
-    rig.host.add_player(local).unwrap();
-    rig.host.start().unwrap();
-    let now = rig.run(0.0, 1);
-    assert!(rig.host.remove_player(local).unwrap());
-    let synchronous = count(&rig, "print:removed-handler");
-    assert!(
-        synchronous < 8,
-        "all {synchronous} independent handlers ran outside aggregate pacing"
-    );
-    // Deferred handlers may run after destruction and therefore must not assume their
-    // instance argument is still live. This fixture deliberately ignores that argument.
-    rig.world.borrow_mut().destroy(local);
-    rig.run(now, 20);
-    assert_eq!(count(&rig, "print:removed-handler"), 8);
-    assert!(
-        rig.lines()
-            .iter()
-            .all(|line| line == "print:removed-handler"),
-        "{:?}",
-        rig.lines()
-    );
-});
+    common::real_limits_test(|| {
+        let mut rig = rig(ScriptRole::Server);
+        rig.host
+            .set_step_budget_sec(metallic_script::STEP_BUDGET_SEC);
+        for index in 0..8 {
+            rig.server_script(&format!("Owner{index}"), SLOW_REMOVING_HANDLER);
+        }
+        let local = player(&rig, "Local");
+        rig.host.add_player(local).unwrap();
+        rig.host.start().unwrap();
+        let now = rig.run(0.0, 1);
+        assert!(rig.host.remove_player(local).unwrap());
+        let synchronous = count(&rig, "print:removed-handler");
+        assert!(
+            synchronous < 8,
+            "all {synchronous} independent handlers ran outside aggregate pacing"
+        );
+        // Deferred handlers may run after destruction and therefore must not assume their
+        // instance argument is still live. This fixture deliberately ignores that argument.
+        rig.world.borrow_mut().destroy(local);
+        rig.run(now, 20);
+        assert_eq!(count(&rig, "print:removed-handler"), 8);
+        assert!(
+            rig.lines()
+                .iter()
+                .all(|line| line == "print:removed-handler"),
+            "{:?}",
+            rig.lines()
+        );
+    });
 }
 
 #[test]
 fn removal_preserves_a_held_input_budget_instead_of_resetting_it() {
-common::real_limits_test(|| {
-    let mut rig = rig(ScriptRole::Combined);
-    rig.host
-        .set_step_budget_sec(metallic_script::STEP_BUDGET_SEC);
-    for index in 0..8 {
-        rig.local_script(&format!("Owner{index}"), SLOW_REMOVING_HANDLER);
-    }
-    rig.host.start().unwrap();
-    let other = player(&rig, "Other");
-    rig.host.add_player(other).unwrap();
-    let now = rig.run(0.0, 1);
-    rig.host.dispatch_input_now(now);
-    // A held frame budget has elapsed; remove must preserve it instead of granting a
-    // new 250 ms allowance. There is no upper wall-time performance assertion here.
-    std::thread::sleep(std::time::Duration::from_millis(275));
-    rig.host.remove_player(other).unwrap();
-    assert_eq!(count(&rig, "print:removed-handler"), 0);
-    rig.world.borrow_mut().destroy(other);
-    rig.host.end_frame();
-    rig.run(now, 20);
-    assert_eq!(count(&rig, "print:removed-handler"), 8);
-    assert!(
-        rig.lines()
-            .iter()
-            .all(|line| line == "print:removed-handler"),
-        "{:?}",
-        rig.lines()
-    );
-});
+    common::real_limits_test(|| {
+        let mut rig = rig(ScriptRole::Combined);
+        rig.host
+            .set_step_budget_sec(metallic_script::STEP_BUDGET_SEC);
+        for index in 0..8 {
+            rig.local_script(&format!("Owner{index}"), SLOW_REMOVING_HANDLER);
+        }
+        rig.host.start().unwrap();
+        let other = player(&rig, "Other");
+        rig.host.add_player(other).unwrap();
+        let now = rig.run(0.0, 1);
+        rig.host.dispatch_input_now(now);
+        // A held frame budget has elapsed; remove must preserve it instead of granting a
+        // new 250 ms allowance. There is no upper wall-time performance assertion here.
+        std::thread::sleep(std::time::Duration::from_millis(275));
+        rig.host.remove_player(other).unwrap();
+        assert_eq!(count(&rig, "print:removed-handler"), 0);
+        rig.world.borrow_mut().destroy(other);
+        rig.host.end_frame();
+        rig.run(now, 20);
+        assert_eq!(count(&rig, "print:removed-handler"), 8);
+        assert!(
+            rig.lines()
+                .iter()
+                .all(|line| line == "print:removed-handler"),
+            "{:?}",
+            rig.lines()
+        );
+    });
 }
 
 #[test]
 fn input_dispatch_does_not_resume_deferred_work_after_gui_ownership_changes() {
-common::real_limits_test(|| {
-    let mut rig = rig(ScriptRole::Client);
-    rig.host
-        .set_step_budget_sec(metallic_script::STEP_BUDGET_SEC);
-    let local = player(&rig, "Local");
-    let other = player(&rig, "Other");
-    let leaving = player(&rig, "Leaving");
-    let owned_gui = gui(&rig, local);
-    rig.local_script("Global", "print('global-start') game:GetService('RunService').Heartbeat:Connect(function() print('global-beat') end)");
-    for index in 0..8 {
-        rig.add_script(
-            "LocalScript",
-            &format!("Owner{index}"),
-            owned_gui,
-            &format!("print('connected') {SLOW_REMOVING_HANDLER}"),
+    common::real_limits_test(|| {
+        let mut rig = rig(ScriptRole::Client);
+        rig.host
+            .set_step_budget_sec(metallic_script::STEP_BUDGET_SEC);
+        let local = player(&rig, "Local");
+        let other = player(&rig, "Other");
+        let leaving = player(&rig, "Leaving");
+        let owned_gui = gui(&rig, local);
+        rig.local_script("Global", "print('global-start') game:GetService('RunService').Heartbeat:Connect(function() print('global-beat') end)");
+        for index in 0..8 {
+            rig.add_script(
+                "LocalScript",
+                &format!("Owner{index}"),
+                owned_gui,
+                &format!("print('connected') {SLOW_REMOVING_HANDLER}"),
+            );
+        }
+        for p in [local, other, leaving] {
+            rig.host.add_player(p).unwrap();
+        }
+        rig.host.set_local_player(local).unwrap();
+        rig.host.start().unwrap();
+        let now = rig.run(0.0, 1);
+        assert_eq!(count(&rig, "print:connected"), 8);
+        rig.host.remove_player(leaving).unwrap();
+        let before = count(&rig, "print:removed-handler");
+        assert!(before < 8, "fixture must retain deferred work");
+        rig.world.borrow_mut().destroy(leaving);
+        rig.world
+            .borrow_mut()
+            .set_parent(owned_gui, Some(other))
+            .unwrap();
+        let fresh_gui = gui(&rig, local);
+        rig.add_script("LocalScript", "Late", fresh_gui, "print('late-start')");
+        rig.host.dispatch_input_now(now);
+        rig.host.end_frame();
+        assert_eq!(
+            count(&rig, "print:removed-handler"),
+            before,
+            "explicit input dispatch resumed a script now owned by another player"
         );
-    }
-    for p in [local, other, leaving] {
-        rig.host.add_player(p).unwrap();
-    }
-    rig.host.set_local_player(local).unwrap();
-    rig.host.start().unwrap();
-    let now = rig.run(0.0, 1);
-    assert_eq!(count(&rig, "print:connected"), 8);
-    rig.host.remove_player(leaving).unwrap();
-    let before = count(&rig, "print:removed-handler");
-    assert!(before < 8, "fixture must retain deferred work");
-    rig.world.borrow_mut().destroy(leaving);
-    rig.world
-        .borrow_mut()
-        .set_parent(owned_gui, Some(other))
-        .unwrap();
-    let fresh_gui = gui(&rig, local);
-    rig.add_script("LocalScript", "Late", fresh_gui, "print('late-start')");
-    rig.host.dispatch_input_now(now);
-    rig.host.end_frame();
-    assert_eq!(
-        count(&rig, "print:removed-handler"),
-        before,
-        "explicit input dispatch resumed a script now owned by another player"
-    );
-    assert_eq!(
-        count(&rig, "print:late-start"),
-        0,
-        "pruning must not start new scripts"
-    );
-    rig.run(now, 2);
-    assert_eq!(count(&rig, "print:removed-handler"), before);
-    assert_eq!(
-        count(&rig, "print:global-start"),
-        1,
-        "unrelated starter work must not restart"
-    );
-    assert_eq!(
-        count(&rig, "print:global-beat"),
-        3,
-        "unrelated valid handlers must continue"
-    );
-    assert_eq!(
-        count(&rig, "print:late-start"),
-        1,
-        "pruning must not consume pending start changes"
-    );
-});
+        assert_eq!(
+            count(&rig, "print:late-start"),
+            0,
+            "pruning must not start new scripts"
+        );
+        rig.run(now, 2);
+        assert_eq!(count(&rig, "print:removed-handler"), before);
+        assert_eq!(
+            count(&rig, "print:global-start"),
+            1,
+            "unrelated starter work must not restart"
+        );
+        assert_eq!(
+            count(&rig, "print:global-beat"),
+            3,
+            "unrelated valid handlers must continue"
+        );
+        assert_eq!(
+            count(&rig, "print:late-start"),
+            1,
+            "pruning must not consume pending start changes"
+        );
+    });
 }
 
 #[test]
@@ -817,48 +817,48 @@ fn lifecycle_dispatch_does_not_call_handlers_after_gui_ownership_changes() {
 
 #[test]
 fn client_input_dispatch_postpones_lua_when_world_scope_is_borrowed() {
-common::real_limits_test(|| {
-    let mut rig = rig(ScriptRole::Client);
-    rig.host
-        .set_step_budget_sec(metallic_script::STEP_BUDGET_SEC);
-    let local = player(&rig, "Local");
-    let leaving = player(&rig, "Leaving");
-    let owned_gui = gui(&rig, local);
-    for index in 0..8 {
-        rig.add_script(
-            "LocalScript",
-            &format!("Owner{index}"),
-            owned_gui,
-            SLOW_REMOVING_HANDLER,
+    common::real_limits_test(|| {
+        let mut rig = rig(ScriptRole::Client);
+        rig.host
+            .set_step_budget_sec(metallic_script::STEP_BUDGET_SEC);
+        let local = player(&rig, "Local");
+        let leaving = player(&rig, "Leaving");
+        let owned_gui = gui(&rig, local);
+        for index in 0..8 {
+            rig.add_script(
+                "LocalScript",
+                &format!("Owner{index}"),
+                owned_gui,
+                SLOW_REMOVING_HANDLER,
+            );
+        }
+        rig.host.add_player(local).unwrap();
+        rig.host.add_player(leaving).unwrap();
+        rig.host.set_local_player(local).unwrap();
+        rig.host.start().unwrap();
+        let now = rig.run(0.0, 1);
+        rig.host.remove_player(leaving).unwrap();
+        rig.world.borrow_mut().destroy(leaving);
+        let before = count(&rig, "print:removed-handler");
+        assert!(before < 8, "fixture must retain deferred work");
+        {
+            let shared = rig.world.clone();
+            let _borrow = shared.borrow_mut();
+            rig.host.dispatch_input_now(now);
+        }
+        rig.host.end_frame();
+        assert_eq!(
+            count(&rig, "print:removed-handler"),
+            before,
+            "Client dispatch executed Lua without validating its borrowed World scope"
         );
-    }
-    rig.host.add_player(local).unwrap();
-    rig.host.add_player(leaving).unwrap();
-    rig.host.set_local_player(local).unwrap();
-    rig.host.start().unwrap();
-    let now = rig.run(0.0, 1);
-    rig.host.remove_player(leaving).unwrap();
-    rig.world.borrow_mut().destroy(leaving);
-    let before = count(&rig, "print:removed-handler");
-    assert!(before < 8, "fixture must retain deferred work");
-    {
-        let shared = rig.world.clone();
-        let _borrow = shared.borrow_mut();
-        rig.host.dispatch_input_now(now);
-    }
-    rig.host.end_frame();
-    assert_eq!(
-        count(&rig, "print:removed-handler"),
-        before,
-        "Client dispatch executed Lua without validating its borrowed World scope"
-    );
-    rig.run(now, 20);
-    assert_eq!(
-        count(&rig, "print:removed-handler"),
-        8,
-        "postponed valid work must remain queued"
-    );
-});
+        rig.run(now, 20);
+        assert_eq!(
+            count(&rig, "print:removed-handler"),
+            8,
+            "postponed valid work must remain queued"
+        );
+    });
 }
 
 #[test]

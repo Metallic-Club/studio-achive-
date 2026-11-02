@@ -17,6 +17,11 @@
 //! [`ScriptHost::with_role`] selects explicit [`ScriptRole`]s, including a Client VM with
 //! deferred local-player binding. Player registration/removal uses trusted World-local IDs.
 //!
+//! Instance members come from the class registry: `api/instance.rs` resolves a name through the
+//! instance's class and calls `HostApi` (`api/host_api.rs`), so a member a class file declares is
+//! visible to scripts with no change here. [`host_methods`] is the table of methods core declares
+//! `Host` and this crate implements.
+//!
 //! ## Budgets in tests
 //!
 //! The execution budgets are wall-clock time, so a busy or paging machine can stall a trivial
@@ -25,11 +30,6 @@
 //! a child process gets the same from [`use_test_budgets_if_a_test_asked`]. Nothing shipped calls
 //! the first, and the second reads its variable in debug builds only, so creators always get the
 //! real limits.
-//!
-//! Instance members come from the class registry: `api/instance.rs` resolves a name through the
-//! instance's class and calls `HostApi` (`api/host_api.rs`), so a member a class file declares is
-//! visible to scripts with no change here. [`host_methods`] is the table of methods core declares
-//! `Host` and this crate implements.
 
 #![warn(missing_docs)]
 

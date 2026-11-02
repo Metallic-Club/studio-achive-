@@ -329,10 +329,10 @@ assert(values.n==5 and values[1] and values[2]=='returned' and values[3]==nil an
 
 #[test]
 fn one_thousand_ordinary_coroutines_fit_the_unchanged_default_budget() {
-common::real_limits_test(|| {
-    let (vm, _) = rig();
-    vm.set_resume_budget(metallic_script::RESUME_BUDGET);
-    let function: Function = vm.lua().load(r#"
+    common::real_limits_test(|| {
+        let (vm, _) = rig();
+        vm.set_resume_budget(metallic_script::RESUME_BUDGET);
+        let function: Function = vm.lua().load(r#"
 local create,resume,wrap,yield,pack=coroutine.create,coroutine.resume,coroutine.wrap,coroutine.yield,table.pack
 for i=1,500 do
     local child=create(function(a) local b=yield(a,nil) return b,nil end)
@@ -347,13 +347,13 @@ for i=1,500 do
     assert(wrapped_last.n==2 and wrapped_last[1]==i+1 and wrapped_last[2]==nil)
 end
 "#).set_name("=CoroutineSmoke").into_function().unwrap();
-    let start = std::time::Instant::now();
-    vm.call_with_budget::<()>(&function, ()).unwrap();
-    eprintln!(
-        "1000 precompiled ordinary coroutine smoke, uncontrolled host load: {:?}",
-        start.elapsed()
-    );
-});
+        let start = std::time::Instant::now();
+        vm.call_with_budget::<()>(&function, ()).unwrap();
+        eprintln!(
+            "1000 precompiled ordinary coroutine smoke, uncontrolled host load: {:?}",
+            start.elapsed()
+        );
+    });
 }
 
 #[test]
