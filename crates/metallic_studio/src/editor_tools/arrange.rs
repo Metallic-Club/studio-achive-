@@ -118,6 +118,9 @@ pub struct ArrangeSettings {
     linear_for: Option<(u64, Option<DVec3>)>,
     handle: Option<HandleDrag>,
     handle_hover: bool,
+    /// Where the wheel last changed the count on the handle. Each notch moves the ring away from
+    /// the pointer, so the wheel stays with the array until the pointer moves.
+    wheel_latch: Option<Pos2>,
     preview: Option<(PreviewKey, Result<Plan, String>)>,
     /// The selection's pivot and size for the drag handle, cached per selection and world.
     handle_basis: Option<(BasisKey, Option<(DVec3, DVec3)>)>,
@@ -168,6 +171,7 @@ impl Default for ArrangeSettings {
             linear_for: None,
             handle: None,
             handle_hover: false,
+            wheel_latch: None,
             preview: None,
             handle_basis: None,
         }
@@ -187,6 +191,7 @@ impl ArrangeSettings {
             self.count_text = h.start_count.to_string();
         }
         self.handle_hover = false;
+        self.wheel_latch = None;
     }
 
     /// The selection's pivot and size (cached until the selection or the world changes).
@@ -218,7 +223,7 @@ impl ArrangeSettings {
 
     /// True when the wheel belongs to the array: the pointer is over the linear drag handle.
     pub fn wheel_on_handle(&self) -> bool {
-        self.mode == ArrayMode::Linear && self.handle_hover
+        self.mode == ArrayMode::Linear && (self.handle_hover || self.wheel_latch.is_some())
     }
 
     /// The array the fields describe.
@@ -561,9 +566,9 @@ pub fn array_window(
 }
 
 /// Ctrl+wheel over the viewport, or the wheel over the linear handle, while the array preview
-/// shows: `notches` (up is +1) change the
-/// count by one each, clamped to the mode's range (linear and path 1, radial 2, up to
-/// [`MAX_COPIES`]). Grid has three counts and ignores the wheel. Returns whether the count changed.
+/// shows: `notches` (up is +1) change the count by one each, clamped to the mode's range (linear
+/// and path 1, radial 2, up to [`MAX_COPIES`]). Grid has three counts and ignores the wheel.
+/// Returns whether the count changed.
 /// Nothing is committed: the preview follows, and "Make N copies" is still the one undo step.
 pub fn wheel_count(s: &mut ArrangeSettings, notches: i32) -> bool {
     if notches == 0 {
@@ -774,6 +779,9 @@ pub fn array_viewport(
     // turns Ctrl+wheel into zoom, and `captures_wheel` keeps the viewport's dolly off the handle
     // (from the same hover as here), so the camera does not move at the same time; while flying
     // the wheel stays the camera speed. Read the raw wheel events, one notch per event.
+    s.wheel_latch = s
+        .wheel_latch
+        .filter(|at| cx.pointer.is_some_and(|p| (p - *at).length() <= 3.0));
     if cx.pointer.is_some() {
         let on_handle = s.wheel_on_handle() && !ui.input(|i| i.pointer.secondary_down());
         let notches: i32 = ui.input(|i| {
@@ -790,6 +798,9 @@ pub fn array_viewport(
                 .sum()
         });
         if wheel_count(s, notches) {
+            if on_handle {
+                s.wheel_latch = cx.pointer;
+            }
             ui.ctx().request_repaint();
         }
     }

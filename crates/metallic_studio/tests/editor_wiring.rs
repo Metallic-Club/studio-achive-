@@ -981,3 +981,569 @@ fn the_hint_card_waits_for_a_gesture() {
     assert!(!h.state().state.gesture_active());
     assert!(got_it(&h), "the card is back");
 }
+
+// --- #218 and #220: box select, Same Tags, smart duplicate, the wheel over the array handle.
+
+/// The ids unordered, for comparing.
+fn sorted(mut ids: Vec<InstanceId>) -> Vec<InstanceId> {
+    ids.sort_by_key(|i| i.to_bits());
+    ids
+}
+
+fn position(state: &EditorState, id: InstanceId) -> DVec3 {
+    match state.world.get(id, "Position").unwrap() {
+        Value::Vector3(v) => DVec3::new(v.x, v.y, v.z),
+        other => panic!("not a position: {other:?}"),
+    }
+}
+
+fn assert_close(a: DVec3, b: DVec3) {
+    assert!(a.distance(b) < 1e-9, "{a} is not {b}");
+}
+
+/// Moves `id` by `by` as one step, the way Properties does.
+fn nudge(state: &mut EditorState, id: InstanceId, by: DVec3) {
+    let to = position(state, id) + by;
+    state.set_property(
+        &[id],
+        "Position",
+        Value::Vector3(Vec3::new(to.x, to.y, to.z)),
+    );
+}
+
+/// The screen box of a world box, grown by `margin` points.
+fn screen_box(
+    h: &Harness<'static, EditorUi>,
+    centre: DVec3,
+    size: DVec3,
+    margin: f32,
+) -> egui::Rect {
+    let mut r = egui::Rect::NOTHING;
+    for x in [-0.5, 0.5] {
+        for y in [-0.5, 0.5] {
+            for z in [-0.5, 0.5] {
+                r.extend_with(screen(h, centre + size * DVec3::new(x, y, z)));
+            }
+        }
+    }
+    r.expand(margin)
+}
+
+/// A box drag from `from` to `to` with `at_press` held, and `at_release` once it travelled.
+fn box_drag(
+    h: &mut Harness<'static, EditorUi>,
+    from: Pos2,
+    to: Pos2,
+    at_press: Modifiers,
+    at_release: Modifiers,
+) {
+    h.event(Event::ModifiersChanged(at_press));
+    h.hover_at(from);
+    h.run_steps(2);
+    button(h, from, true, at_press);
+    h.hover_at(to);
+    h.run_steps(2);
+    assert!(h.state().viewport.is_busy(), "the box drag started");
+    h.event(Event::ModifiersChanged(at_release));
+    h.run_steps(1);
+    button(h, to, false, at_release);
+    h.event(Event::ModifiersChanged(Modifiers::NONE));
+    h.run_steps(2);
+}
+
+/// An editor for dragging over parts: no baseplate (a drag from a part would move it), the
+/// Select tool, and the camera close enough that the parts are well apart on screen. The
+/// viewport narrows when the first part is selected (Properties opens), so screen points must
+/// be read right before they are used.
+fn box_editor() -> (Harness<'static, EditorUi>, Scene) {
+    let (mut ui, sc) = editor();
+    ui.state.world.destroy(sc.base);
+    ui.state.tool = Tool::Select;
+    ui.viewport.camera.position = DVec3::new(0.0, 6.0, 24.0);
+    ui.viewport.camera.look_at(DVec3::ZERO);
+    (harness(ui), sc)
+}
+
+const AT_A: DVec3 = DVec3::new(-8.0, 2.0, 0.0);
+const AT_B: DVec3 = DVec3::new(6.0, 1.0, 3.0);
+const AT_C: DVec3 = DVec3::new(12.0, 1.0, -6.0);
+
+fn around_a(h: &Harness<'static, EditorUi>) -> egui::Rect {
+    screen_box(h, AT_A, DVec3::splat(4.0), 6.0)
+}
+
+fn around_b(h: &Harness<'static, EditorUi>) -> egui::Rect {
+    // B is turned 30 degrees: its screen box needs room for the corners.
+    screen_box(h, AT_B, DVec3::splat(3.0), 6.0)
+}
+
+fn around_c(h: &Harness<'static, EditorUi>) -> egui::Rect {
+    screen_box(h, AT_C, DVec3::splat(2.0), 6.0)
+}
+
+/// A box that holds A's centre but only part of A.
+fn part_of_a(h: &Harness<'static, EditorUi>) -> (Pos2, Pos2) {
+    (around_a(h).min, screen(h, AT_A) + egui::vec2(3.0, 3.0))
+}
+
+#[test]
+fn box_select_takes_parts_fully_inside_and_follows_the_modifiers() {
+    let (mut h, sc) = box_editor();
+    let none = Modifiers::NONE;
+    let shift = Modifiers::SHIFT;
+    let ctrl = Modifiers::COMMAND;
+
+    // Fully inside: A only.
+    let r = around_a(&h);
+    box_drag(&mut h, r.min, r.max, none, none);
+    assert_eq!(h.state().state.selection.ids(), &[sc.a]);
+    assert!(
+        h.state().state.history.is_empty(),
+        "selecting is not an edit"
+    );
+
+    // Holding A's centre is not enough, and a plain box replaces.
+    let (from, to) = part_of_a(&h);
+    box_drag(&mut h, from, to, none, none);
+    assert!(
+        h.state().state.selection.is_empty(),
+        "the centre is not enough"
+    );
+
+    // Alt, once the drag has started, takes what it touches.
+    let (from, to) = part_of_a(&h);
+    box_drag(&mut h, from, to, none, Modifiers::ALT);
+    assert_eq!(h.state().state.selection.ids(), &[sc.a]);
+
+    // Shift adds, and the new part is the active one.
+    let r = around_b(&h);
+    box_drag(&mut h, r.min, r.max, shift, shift);
+    assert_eq!(h.state().state.selection.ids(), &[sc.a, sc.b]);
+
+    // Ctrl removes.
+    let r = around_a(&h);
+    box_drag(&mut h, r.min, r.max, ctrl, ctrl);
+    assert_eq!(h.state().state.selection.ids(), &[sc.b]);
+
+    // Ctrl over a part that is not selected changes nothing.
+    let r = around_c(&h);
+    box_drag(&mut h, r.min, r.max, ctrl, ctrl);
+    assert_eq!(h.state().state.selection.ids(), &[sc.b]);
+
+    // The modifiers held at release decide, as for the lasso.
+    let r = around_c(&h);
+    box_drag(&mut h, r.min, r.max, none, shift);
+    assert_eq!(h.state().state.selection.ids(), &[sc.b, sc.c]);
+
+    // Alt with Shift: added by touch.
+    h.state_mut().state.selection.set([sc.b]);
+    h.run_steps(2);
+    let (from, to) = part_of_a(&h);
+    box_drag(&mut h, from, to, shift, shift | Modifiers::ALT);
+    assert_eq!(h.state().state.selection.ids(), &[sc.b, sc.a]);
+
+    // Alt with Ctrl: removed by touch.
+    let (from, to) = part_of_a(&h);
+    box_drag(&mut h, from, to, ctrl, ctrl | Modifiers::ALT);
+    assert_eq!(h.state().state.selection.ids(), &[sc.b]);
+    assert!(h.state().state.history.is_empty());
+}
+
+#[test]
+fn clicks_follow_the_same_modifiers_as_the_box() {
+    let (mut h, sc) = box_editor();
+    let press = |h: &mut Harness<'static, EditorUi>, on: Option<DVec3>, m: Modifiers| {
+        h.run_steps(2);
+        let at = on.map_or_else(|| around_a(h).min, |p| screen(h, p));
+        h.event(Event::ModifiersChanged(m));
+        h.hover_at(at);
+        h.run_steps(2);
+        button(h, at, true, m);
+        button(h, at, false, m);
+        h.event(Event::ModifiersChanged(Modifiers::NONE));
+        h.run_steps(1);
+    };
+    press(&mut h, Some(AT_A), Modifiers::NONE);
+    assert_eq!(h.state().state.selection.ids(), &[sc.a]);
+    press(&mut h, Some(AT_C), Modifiers::SHIFT);
+    assert_eq!(h.state().state.selection.ids(), &[sc.a, sc.c], "Shift adds");
+    press(&mut h, None, Modifiers::SHIFT);
+    assert_eq!(
+        h.state().state.selection.len(),
+        2,
+        "Shift on nothing keeps it"
+    );
+    press(&mut h, Some(AT_A), Modifiers::COMMAND);
+    assert_eq!(
+        h.state().state.selection.ids(),
+        &[sc.c],
+        "Ctrl-click toggles"
+    );
+    press(&mut h, Some(AT_A), Modifiers::COMMAND);
+    assert_eq!(h.state().state.selection.ids(), &[sc.c, sc.a]);
+    press(&mut h, None, Modifiers::NONE);
+    assert!(h.state().state.selection.is_empty(), "a plain click clears");
+}
+
+#[test]
+fn select_similar_by_tags_reads_the_engine_tags() {
+    let (mut ui, sc) = editor();
+    let w = &mut ui.state.world;
+    w.add_tag(sc.a, "Wall").unwrap();
+    w.add_tag(sc.a, "Stone").unwrap();
+    // The same tags in the other order; B has only one of them.
+    w.add_tag(sc.c, "Stone").unwrap();
+    w.add_tag(sc.c, "Wall").unwrap();
+    w.add_tag(sc.b, "Wall").unwrap();
+    let mut h = harness(ui);
+    h.state_mut().state.selection.set([sc.a]);
+    h.run_steps(2);
+    let centre = h.state().viewport.rect().center();
+    h.hover_at(centre);
+    h.run_steps(1);
+    h.key_press_modifiers(Modifiers::SHIFT, egui::Key::G);
+    h.run_steps(2);
+    assert_eq!(h.state().tools.state().popover, Some(Popover::Similar));
+    h.key_press(egui::Key::T);
+    h.run_steps(2);
+    assert_eq!(
+        sorted(h.state().state.selection.ids().to_vec()),
+        sorted(vec![sc.a, sc.c])
+    );
+}
+
+#[test]
+fn smart_duplicate_repeats_the_offset_one_undo_step_each() {
+    let (mut ui, sc) = editor();
+    let start = position(&ui.state, sc.b);
+    ui.state.selection.set([sc.b]);
+    ui.run_action("edit.duplicate");
+    let first = ui.state.selection.ids()[0];
+    assert_eq!(ui.state.history.len(), 1);
+    let height = ui.state.selection_bounds().unwrap().size().y;
+    assert_close(
+        position(&ui.state, first),
+        start + DVec3::new(0.0, height, 0.0),
+    );
+    assert_eq!(ui.state.last_duplicate_offset(), None, "not moved yet");
+
+    // Move the copy: the next one repeats source-to-copy, on the copy.
+    let offset = DVec3::new(5.0, 0.0, -1.5);
+    let to = start + offset;
+    let to = Value::Vector3(Vec3::new(to.x, to.y, to.z));
+    ui.state.set_property(&[first], "Position", to);
+    assert_eq!(ui.state.last_duplicate_offset(), Some(offset));
+    let keep = ui.state.world.get(first, "Orientation").unwrap();
+    ui.run_action("edit.duplicate");
+    let second = ui.state.selection.ids()[0];
+    assert_ne!(second, first);
+    assert_eq!(ui.state.selection.len(), 1, "the new copy is selected");
+    assert_close(position(&ui.state, second), start + offset * 2.0);
+    assert_eq!(ui.state.world.get(second, "Orientation").unwrap(), keep);
+    assert_eq!(ui.state.history.len(), 3, "duplicate, move, duplicate");
+    assert_eq!(
+        ui.state.history.undo_name(&ui.state.world).as_deref(),
+        Some("Duplicate 1 object")
+    );
+
+    // It keeps going without another move.
+    ui.run_action("edit.duplicate");
+    let third = ui.state.selection.ids()[0];
+    assert_close(position(&ui.state, third), start + offset * 3.0);
+    assert_eq!(ui.state.history.len(), 4);
+    assert_eq!(ui.state.last_duplicate_offset(), Some(offset));
+
+    // Moving the newest copy changes what repeats.
+    nudge(&mut ui.state, third, DVec3::new(0.0, 1.0, 0.0));
+    ui.run_action("edit.duplicate");
+    let fourth = ui.state.selection.ids()[0];
+    let further = offset + DVec3::new(0.0, 1.0, 0.0);
+    assert_close(
+        position(&ui.state, fourth),
+        start + offset * 2.0 + further * 2.0,
+    );
+    let chain = position(&ui.state, fourth);
+
+    // One undo per Ctrl+D: the last copy goes, and only it.
+    ui.run_action("edit.undo");
+    assert!(!ui.state.is_live(fourth));
+    assert!(ui.state.is_live(third));
+    assert_eq!(ui.state.history.len(), 5);
+    assert!(ui.state.selection.is_empty());
+    ui.run_action("edit.redo");
+    assert!(ui.state.is_live(fourth), "redo brings the same copy back");
+    assert_close(position(&ui.state, fourth), chain);
+    for _ in 0..6 {
+        ui.run_action("edit.undo");
+    }
+    assert!(ui.state.history.is_empty());
+    for c in [first, second, third, fourth] {
+        assert!(!ui.state.is_live(c));
+    }
+    assert_close(position(&ui.state, sc.b), start);
+}
+
+#[test]
+fn smart_duplicate_resets_on_another_edit_or_selection_change() {
+    // Each case: duplicate, move the copy, do `other`; Ctrl+D is the plain duplicate again.
+    type Other = fn(&mut EditorUi, &Scene, InstanceId);
+    let cases: [(&str, Other); 7] = [
+        ("colour of the copy", |ui, _, copy| {
+            ui.state.set_property(
+                &[copy],
+                "Color",
+                Value::Color3(metallic_core::Color3::new(0.9, 0.1, 0.1)),
+            );
+        }),
+        ("size of the copy", |ui, _, copy| {
+            ui.state
+                .set_property(&[copy], "Size", Value::Vector3(Vec3::new(3.0, 2.0, 3.0)));
+        }),
+        ("an edit of another part", |ui, sc, _| {
+            nudge(&mut ui.state, sc.c, DVec3::new(1.0, 0.0, 0.0));
+        }),
+        ("an edit of the source", |ui, sc, _| {
+            nudge(&mut ui.state, sc.b, DVec3::new(1.0, 0.0, 0.0));
+        }),
+        (
+            "selecting something else and coming back",
+            |ui, sc, copy| {
+                ui.state.selection.set([sc.a]);
+                ui.state.selection.set([copy]);
+            },
+        ),
+        ("adding to the selection and taking it out", |ui, sc, _| {
+            ui.state.selection.add(sc.a);
+            let keep = ui.state.selection.ids()[0];
+            ui.state.selection.set([keep]);
+        }),
+        ("undoing the move", |ui, _, _| {
+            ui.run_action("edit.undo");
+        }),
+    ];
+    for (what, other) in cases {
+        let (mut ui, sc) = editor();
+        ui.state.selection.set([sc.b]);
+        ui.run_action("edit.duplicate");
+        let copy = ui.state.selection.ids()[0];
+        nudge(&mut ui.state, copy, DVec3::new(5.0, 0.0, 0.0));
+        other(&mut ui, &sc, copy);
+        assert_eq!(ui.state.last_duplicate_offset(), None, "{what}");
+        let at = position(&ui.state, copy);
+        let height = ui.state.selection_bounds().unwrap().size().y;
+        ui.run_action("edit.duplicate");
+        let next = ui.state.selection.ids()[0];
+        assert_ne!(next, copy, "{what}");
+        assert_close(position(&ui.state, next), at + DVec3::new(0.0, height, 0.0));
+    }
+
+    // The copy moved back onto its source: nothing to repeat, so not a stack in one spot.
+    let (mut ui, sc) = editor();
+    let start = position(&ui.state, sc.b);
+    ui.state.selection.set([sc.b]);
+    ui.run_action("edit.duplicate");
+    let copy = ui.state.selection.ids()[0];
+    let height = position(&ui.state, copy).y - start.y;
+    nudge(&mut ui.state, copy, DVec3::new(0.0, -height, 0.0));
+    assert_close(position(&ui.state, copy), start);
+    ui.run_action("edit.duplicate");
+    let next = ui.state.selection.ids()[0];
+    assert_close(
+        position(&ui.state, next),
+        start + DVec3::new(0.0, height, 0.0),
+    );
+}
+
+#[test]
+fn smart_duplicate_repeats_a_turn_and_moves_models_as_one() {
+    use metallic_studio::tools::geom::rotation_from_orientation_degrees as turn;
+
+    // A move and a quarter turn: the next copy turns again, about the same axis (spec 8.1).
+    let (mut ui, sc) = editor();
+    let start = position(&ui.state, sc.c);
+    ui.state.selection.set([sc.c]);
+    ui.run_action("edit.duplicate");
+    let first = ui.state.selection.ids()[0];
+    let to = start + DVec3::new(4.0, 0.0, 0.0);
+    ui.state.set_property(
+        &[first],
+        "Position",
+        Value::Vector3(Vec3::new(to.x, to.y, to.z)),
+    );
+    ui.state.set_property(
+        &[first],
+        "Orientation",
+        Value::Vector3(Vec3::new(0.0, 90.0, 0.0)),
+    );
+    ui.run_action("edit.duplicate");
+    let second = ui.state.selection.ids()[0];
+    // Y by 90 degrees takes +X to -Z.
+    assert_close(position(&ui.state, second), to + DVec3::new(0.0, 0.0, -4.0));
+    let Value::Vector3(o) = ui.state.world.get(second, "Orientation").unwrap() else {
+        panic!("no orientation");
+    };
+    let q = turn(DVec3::new(o.x, o.y, o.z));
+    assert!(q.angle_between(turn(DVec3::new(0.0, 180.0, 0.0))) < 1e-6);
+    assert_eq!(ui.state.history.len(), 4, "duplicate, 2 edits, duplicate");
+    ui.run_action("edit.undo");
+    assert!(!ui.state.is_live(second));
+    assert_eq!(ui.state.history.len(), 3);
+
+    // A Model: its parts keep their places in it.
+    let (mut ui, sc) = editor();
+    ui.state.selection.set([sc.a, sc.b]);
+    ui.run_action("edit.group");
+    let model = ui.state.selection.ids()[0];
+    ui.run_action("edit.duplicate");
+    let copy = ui.state.selection.ids()[0];
+    assert_ne!(copy, model);
+    let parts = ui.state.selection.parts(&ui.state.world);
+    assert_eq!(parts.len(), 2);
+    let offset = DVec3::new(0.0, 0.0, 9.0);
+    let (a, b) = (position(&ui.state, sc.a), position(&ui.state, sc.b));
+    let at = |p: DVec3| Value::Vector3(Vec3::new(p.x, p.y, p.z));
+    let moved: Vec<Command> = parts
+        .iter()
+        .zip([a, b])
+        .map(|(&p, src)| {
+            let old = ui.state.world.get(p, "Position").unwrap();
+            Command::set(p, "Position", old, at(src + offset))
+        })
+        .collect();
+    ui.state
+        .apply(Command::Batch {
+            name: "Move 2 parts".into(),
+            commands: moved,
+        })
+        .unwrap();
+    ui.run_action("edit.duplicate");
+    let next = ui.state.selection.parts(&ui.state.world);
+    assert_eq!(next.len(), 2);
+    assert_close(position(&ui.state, next[0]), a + offset * 2.0);
+    assert_close(position(&ui.state, next[1]), b + offset * 2.0);
+    assert_eq!(ui.state.selection.len(), 1, "the Model's copy is selected");
+}
+
+#[test]
+fn ctrl_d_after_a_real_gizmo_drag_repeats_it_and_seeds_the_array() {
+    let (ui, sc) = editor();
+    let mut h = harness(ui);
+    h.state_mut().state.selection.set([sc.a]);
+    let source = position(&h.state().state, sc.a);
+    h.state_mut().run_action("edit.duplicate");
+    let first = h.state().state.selection.ids()[0];
+    h.state_mut().state.tool = Tool::Move;
+    h.run_steps(3);
+    // The Y arrow, as in the viewport drag test above.
+    let pivot = screen(&h, position(&h.state().state, first));
+    let grab = pivot - egui::vec2(0.0, 54.0);
+    h.hover_at(grab);
+    h.run_steps(2);
+    button(&mut h, grab, true, Modifiers::NONE);
+    h.hover_at(grab - egui::vec2(0.0, 60.0));
+    h.run_steps(2);
+    assert!(h.state().viewport.is_dragging());
+    button(&mut h, grab - egui::vec2(0.0, 60.0), false, Modifiers::NONE);
+    h.run_steps(2);
+    assert_eq!(h.state().state.history.len(), 2, "duplicate, drag");
+    assert_eq!(h.state().state.selection.ids(), &[first], "still the copy");
+    let at = position(&h.state().state, first);
+    let offset = at - source;
+    assert!(offset.y > 4.0, "the drag moved it up: {offset}");
+    assert_eq!(h.state().state.last_duplicate_offset(), Some(offset));
+
+    // The Array popover opens with that offset.
+    h.state_mut().run_action("build.array");
+    h.run_steps(2);
+    assert_eq!(h.state().tools.state().arrange.linear.offset, offset);
+    h.key_press(egui::Key::Escape);
+    h.run_steps(2);
+
+    let centre = viewport_top(&h);
+    h.hover_at(centre);
+    h.run_steps(1);
+    h.key_press_modifiers(Modifiers::COMMAND, egui::Key::D);
+    h.run_steps(2);
+    let second = h.state().state.selection.ids()[0];
+    assert_ne!(second, first);
+    assert_close(position(&h.state().state, second), at + offset);
+    assert_eq!(h.state().state.history.len(), 3);
+    h.key_press_modifiers(Modifiers::COMMAND, egui::Key::Z);
+    h.run_steps(2);
+    assert!(!h.state().state.is_live(second));
+    assert_eq!(h.state().state.history.len(), 2);
+
+    // Without a tracked offset the popover has its old default: the size on X.
+    h.state_mut().state.selection.set([sc.c]);
+    h.state_mut().run_action("build.array");
+    h.run_steps(2);
+    assert_eq!(
+        h.state().tools.state().arrange.linear.offset,
+        DVec3::new(2.0, 0.0, 0.0)
+    );
+}
+
+fn wheel(h: &mut Harness<'static, EditorUi>, up: bool, modifiers: Modifiers) {
+    h.event(Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Line,
+        delta: egui::vec2(0.0, if up { 1.0 } else { -1.0 }),
+        phase: egui::TouchPhase::Move,
+        source: egui::MouseWheelSource::Unknown,
+        modifiers,
+    });
+    h.run_steps(2);
+}
+
+#[test]
+fn the_wheel_over_the_array_handle_changes_the_count_and_not_the_camera() {
+    use metallic_studio::tools::arrange::array::handle_position;
+    let (ui, sc) = editor();
+    let mut h = harness(ui);
+    h.state_mut().state.selection.set([sc.a]);
+    h.state_mut().run_action("build.array");
+    h.run_steps(3);
+    let count = |h: &Harness<'static, EditorUi>| h.state().tools.state().arrange.linear.count;
+    let step = h.state().tools.state().arrange.linear.offset;
+    assert_eq!(count(&h), 5);
+
+    // Over the handle: the count, not the camera.
+    let ring = screen(&h, handle_position(DVec3::new(-8.0, 2.0, 0.0), step, 5));
+    h.hover_at(ring);
+    h.run_steps(3);
+    assert!(h.state().tools.captures_wheel());
+    let camera = h.state().viewport.camera;
+    wheel(&mut h, true, Modifiers::NONE);
+    assert_eq!(count(&h), 6);
+    assert_eq!(h.state().tools.state().arrange.count_text, "6");
+    // The ring moved away from the pointer; the wheel stays with it until the pointer moves.
+    wheel(&mut h, true, Modifiers::NONE);
+    assert_eq!(count(&h), 7);
+    wheel(&mut h, false, Modifiers::NONE);
+    wheel(&mut h, false, Modifiers::NONE);
+    wheel(&mut h, false, Modifiers::NONE);
+    assert_eq!(count(&h), 4);
+    h.run_steps(8);
+    assert_eq!(
+        h.state().viewport.camera,
+        camera,
+        "no dolly over the handle"
+    );
+    assert!(h.state().state.history.is_empty(), "nothing committed");
+
+    // Pointer gone: the camera has its wheel back and the count stays.
+    let away = viewport_top(&h);
+    h.hover_at(away);
+    h.run_steps(3);
+    assert!(!h.state().tools.captures_wheel());
+    wheel(&mut h, true, Modifiers::NONE);
+    h.run_steps(8);
+    assert_eq!(count(&h), 4);
+    assert_ne!(h.state().viewport.camera, camera, "the wheel dollies");
+
+    // Ctrl+wheel keeps working anywhere, without the dolly.
+    let camera = h.state().viewport.camera;
+    wheel(&mut h, true, Modifiers::COMMAND);
+    h.run_steps(8);
+    assert_eq!(count(&h), 5);
+    assert_eq!(h.state().viewport.camera, camera);
+}
