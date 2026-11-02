@@ -603,8 +603,7 @@ impl Differ<'_> {
             .filter(|r| self.edit_ids.contains(r))
             .collect();
         while let Some(id) = walk.pop() {
-            let skip =
-                Some(id) == self.players || is_engine_class(self.edit.class_name(id));
+            let skip = Some(id) == self.players || is_engine_class(self.edit.class_name(id));
             if skip {
                 continue;
             }
@@ -691,15 +690,12 @@ pub struct PlayReview {
 impl PlayReview {
     /// The offer for `groups`, or `None` when nothing changed. `revision` is the history's now.
     pub fn new(groups: Vec<ChangeGroup>, revision: u64) -> Option<PlayReview> {
-        groups
-            .iter()
-            .any(|g| g.total() > 0)
-            .then_some(PlayReview {
-                groups,
-                open: false,
-                revision,
-                esc_ready: false,
-            })
+        groups.iter().any(|g| g.total() > 0).then_some(PlayReview {
+            groups,
+            open: false,
+            revision,
+            esc_ready: false,
+        })
     }
 
     /// Every change, listed or not (the N of "Review N changes from Play").
@@ -1079,8 +1075,12 @@ mod tests {
         edit.set_parent(part, None).unwrap();
         let mut play = edit.deep_clone();
         play.destroy(part);
-        let visible: Vec<InstanceId> =
-            edit.roots().iter().copied().filter(|&r| r != part).collect();
+        let visible: Vec<InstanceId> = edit
+            .roots()
+            .iter()
+            .copied()
+            .filter(|&r| r != part)
+            .collect();
         assert_eq!(compare(&edit, &visible, &play).total(), 0);
     }
 

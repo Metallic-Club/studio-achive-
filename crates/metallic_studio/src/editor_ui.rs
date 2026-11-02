@@ -17,6 +17,9 @@
 //! ([`PlayInput`]), then the session advances and the viewport draws it. #367's status bar shows
 //! "Playing" in `success`, the viewport has a `success` frame, Explorer shows the play world read-only,
 //! and Properties, Insert, the script editor and every editing action are off until Stop.
+//!
+//! **After Stop** the level is as it was and a strip above Output offers what Play changed
+//! ([`play_review`]). Esc dismisses it once the key that stopped Play has been let go.
 use eframe::egui::{self, Frame, Margin, RichText};
 use eframe::egui_wgpu;
 
@@ -964,7 +967,12 @@ impl EditorUi {
 
         // The offer after Stop: a strip above Output, in nobody's way (#130).
         self.state.sync_play_review();
-        if let Some(size) = self.state.play_review().map(play_review::height) {
+        let room = ui.available_height();
+        if let Some(size) = self
+            .state
+            .play_review()
+            .map(|r| play_review::height(r, room))
+        {
             egui::Panel::bottom("play_review")
                 .exact_size(size)
                 .resizable(false)

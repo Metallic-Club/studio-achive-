@@ -31,7 +31,7 @@ fn grouped(n: usize) -> String {
     let digits = n.to_string();
     let mut out = String::with_capacity(digits.len() + digits.len() / 3);
     for (i, c) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i) % 3 == 0 {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(c);
@@ -80,10 +80,12 @@ fn lines(review: &PlayReview) -> Vec<Line> {
     out
 }
 
-/// The height of the panel while `review` shows.
-pub fn height(review: &PlayReview) -> f32 {
+/// The height of the panel while `review` shows, with `room` px between the panels around it. The
+/// open list takes at most half of that, so the level stays in view in a small window.
+pub fn height(review: &PlayReview, room: f32) -> f32 {
     if review.open {
-        let rows = lines(review).len().min(VISIBLE_ROWS);
+        let fit = ((room * 0.5 - STRIP - FOOTER) / ROW).floor().max(2.0) as usize;
+        let rows = lines(review).len().min(VISIBLE_ROWS).min(fit);
         STRIP + rows as f32 * ROW + FOOTER
     } else {
         STRIP
@@ -184,7 +186,7 @@ fn list(
     egui::ScrollArea::vertical()
         .id_salt("play_review_list")
         .auto_shrink([false, false])
-        .max_height(lines.len().min(VISIBLE_ROWS) as f32 * ROW)
+        .max_height(ui.available_height() - FOOTER)
         .show_rows(ui, ROW, lines.len(), |ui, range| {
             for line in &lines[range] {
                 match *line {
@@ -281,7 +283,13 @@ fn item_row(
     );
     x += name_width + 12.0;
     let room = (rect.right() - 12.0 - x).max(0.0);
-    let what = truncated(painter, &summary, fonts::small(), theme::text_2(), room * 0.6);
+    let what = truncated(
+        painter,
+        &summary,
+        fonts::small(),
+        theme::text_2(),
+        room * 0.6,
+    );
     let what_width = what.size().x;
     painter.galley(
         egui::pos2(x, y - what.size().y / 2.0),
@@ -292,7 +300,10 @@ fn item_row(
     let room = (rect.right() - 12.0 - x).max(0.0);
     let place = truncated(painter, &item.place, fonts::small(), theme::text_3(), room);
     painter.galley(
-        egui::pos2(rect.right() - 12.0 - place.size().x, y - place.size().y / 2.0),
+        egui::pos2(
+            rect.right() - 12.0 - place.size().x,
+            y - place.size().y / 2.0,
+        ),
         place,
         theme::text_3(),
     );
@@ -396,11 +407,15 @@ mod tests {
     #[test]
     fn the_open_list_is_taller_and_stops_growing() {
         let mut small = review(2, 0);
-        assert_eq!(height(&small), STRIP);
+        assert_eq!(height(&small, 800.0), STRIP);
         small.open = true;
-        assert_eq!(height(&small), STRIP + 3.0 * ROW + FOOTER);
+        assert_eq!(height(&small, 800.0), STRIP + 3.0 * ROW + FOOTER);
         let mut big = review(400, 0);
         big.open = true;
-        assert_eq!(height(&big), STRIP + VISIBLE_ROWS as f32 * ROW + FOOTER);
+        assert_eq!(
+            height(&big, 800.0),
+            STRIP + VISIBLE_ROWS as f32 * ROW + FOOTER
+        );
+        assert_eq!(height(&big, 300.0), STRIP + 2.0 * ROW + FOOTER);
     }
 }

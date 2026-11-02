@@ -269,10 +269,7 @@ fn a_created_instance_is_kept_with_its_subtree() {
 #[test]
 fn a_destroyed_instance_can_be_kept_destroyed() {
     let log = OutputLog::new(32);
-    let (mut s, _, crate_, _) = state(
-        level("workspace:FindFirstChild('Crate'):Destroy()"),
-        &log,
-    );
+    let (mut s, _, crate_, _) = state(level("workspace:FindFirstChild('Crate'):Destroy()"), &log);
     play(&mut s, 2);
     assert_eq!(rows(&s), ["Crate: Removed, 1 inside"]);
     assert!(s.is_live(crate_), "Stop alone removes nothing");
@@ -342,7 +339,10 @@ workspace:FindFirstChild('Crate').PrimaryPart = first
     s.keep_play_changes();
     assert!(child(&s.world, workspace(&s), "Second").is_some());
     assert!(child(&s.world, workspace(&s), "First").is_none());
-    assert_eq!(s.world.get(crate_, "PrimaryPart").unwrap(), Value::Ref(None));
+    assert_eq!(
+        s.world.get(crate_, "PrimaryPart").unwrap(),
+        Value::Ref(None)
+    );
 }
 
 #[test]
@@ -709,10 +709,13 @@ fn a_row_click_selects_the_instance_and_keep_all_ticks_everything() {
         child(&s.world, workspace(s), "Probe").unwrap()
     };
     assert_eq!(h.state().state.selection.active(), Some(probe));
-    assert!(h.state().state.play_review().is_some(), "selecting is no edit");
+    assert!(
+        h.state().state.play_review().is_some(),
+        "selecting is no edit"
+    );
     // A real pointer leaves the row over some frames, and the row's tooltip with it.
     let keep_all = h.get_by_label("Keep all").rect().center();
-    h.hover_at(egui::pos2(f32::from(keep_all.x as i16), f32::from(keep_all.y as i16)));
+    h.hover_at(keep_all);
     h.run_steps(2);
     h.get_by_label("Keep all").click();
     h.run_steps(2);
@@ -755,6 +758,139 @@ fn the_actions_reach_the_offer_only_while_there_is_one() {
     assert!(!enabled(&h, "play.review"));
 }
 
+/// Saves the whole frame as `<dir>/<name>.png`.
+fn picture(h: &mut Harness<'static, EditorUi>, dir: &Path, name: &str) {
+    let frame = h.render().unwrap();
+    let (w, height) = (frame.width() as usize, frame.height() as usize);
+    let pixels = frame
+        .pixels()
+        .map(|p| {
+            let [r, g, b, a] = p.0;
+            egui::Color32::from_rgba_premultiplied(r, g, b, a)
+        })
+        .collect();
+    let image = egui::ColorImage::new([w, height], pixels);
+    metallic_studio::screenshot::save_png(&dir.join(format!("{name}.png")), &image).unwrap();
+}
+
+/// Pictures of the offer, with no window (`docs/agents/130-keep-play-edits/`). A relative
+/// `METALLIC_PICTURES_DIR` is relative to this crate, so pass a full path.
+///
+/// ```text
+/// METALLIC_PICTURES_DIR=/full/path cargo test -p metallic_studio --test play_review -j 4 -- --ignored capture_the_offer
+/// ```
+#[test]
+#[ignore = "writes pictures; needs METALLIC_PICTURES_DIR"]
+fn capture_the_offer() {
+    metallic_script::use_test_budgets_on_this_thread();
+    let dir = PathBuf::from(std::env::var("METALLIC_PICTURES_DIR").unwrap());
+    let template = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../templates/parkour");
+    let mut ui = EditorUi::demo(&template).unwrap();
+    ui.state.selection.clear();
+    ui.hints = metallic_studio::hints::Hints::in_memory();
+    let scripts = ui.state.world.root("ServerScriptService").unwrap();
+    let script = named(&mut ui.state.world, "Script", scripts, "Decorate");
+    let source = "
+local course = workspace:FindFirstChild('Course')
+local parts = course:GetChildren()
+parts[3].Position = parts[3].Position + Vector3.new(0, 2, 0)
+parts[3].Color = Color3.fromRGB(150, 160, 175)
+parts[4].Size = parts[4].Size + Vector3.new(2, 0, 2)
+parts[5]:Destroy()
+local gate = Instance.new('Model')
+gate.Name = 'Gate'
+for i = 1, 3 do
+    local post = Instance.new('Part')
+    post.Name = 'Post' .. i
+    post.Anchored = true
+    post.Size = Vector3.new(1, 8, 1)
+    post.Position = Vector3.new(i * 6, 4, -12)
+    post.Parent = gate
+end
+gate.Parent = workspace
+";
+    ui.state
+        .world
+        .set(script, "Source", Value::String(source.into()))
+        .unwrap();
+    let mut themed = false;
+    let mut h = Harness::builder()
+        .with_size(egui::vec2(1440.0, 900.0))
+        .wgpu()
+        .build_ui_state(
+            move |ui, editor: &mut EditorUi| {
+                if !themed {
+                    metallic_studio::theme::apply(
+                        ui.ctx(),
+                        metallic_studio::theme::ThemeId::Graphite,
+                    );
+                    themed = true;
+                    ui.ctx().request_repaint();
+                    return;
+                }
+                editor.ui(ui, None);
+            },
+            ui,
+        );
+    h.run_steps(3);
+    assert!(h.state_mut().state.start_play("play.start"));
+    for _ in 0..30 {
+        h.state_mut().state.play.update(TICK);
+    }
+    h.state_mut().state.stop_play();
+    h.run_steps(3);
+    picture(&mut h, &dir, "offer");
+
+    h.get_by_label("Review").click();
+    h.run_steps(3);
+    let names: Vec<String> = h
+        .state()
+        .state
+        .play_review()
+        .unwrap()
+        .items()
+        .map(|i| i.name.clone())
+        .collect();
+    println!("rows: {names:?}");
+    for item in h.state_mut().state.play_review_mut().unwrap().items_mut() {
+        item.keep = item.name == "Gate" || matches!(item.kind, ChangeKind::Removed { .. });
+    }
+    h.hover_at(egui::pos2(720.0, 200.0));
+    h.run_steps(3);
+    picture(&mut h, &dir, "list-open");
+
+    let label = h
+        .state()
+        .state
+        .play_review()
+        .map(|r| format!("Keep {} changes", r.picked()))
+        .unwrap();
+    h.get_by_label(&label).click();
+    h.run_steps(3);
+    picture(&mut h, &dir, "after-keep");
+
+    // A game that makes thousands of things: the list is cut and says so.
+    let many = "for i = 1, 3214 do
+        local p = Instance.new('Part')
+        p.Name = 'Spawned' .. i
+        p.Anchored = true
+        p.Parent = workspace
+    end";
+    let world = &mut h.state_mut().state.world;
+    let script = world
+        .find_first_child(world.root("ServerScriptService").unwrap(), "Decorate")
+        .unwrap();
+    world
+        .set(script, "Source", Value::String(many.into()))
+        .unwrap();
+    assert!(h.state_mut().state.start_play("play.start"));
+    h.state_mut().state.play.update(TICK);
+    h.state_mut().state.stop_play();
+    h.state_mut().state.toggle_play_review();
+    h.run_steps(3);
+    picture(&mut h, &dir, "list-capped");
+}
+
 /// How long the diff takes, for the progress note.
 ///
 /// ```text
@@ -786,9 +922,6 @@ fn the_diff_at_stop_is_quick() {
             group.items.len(),
             group.unlisted
         );
-        assert!(matches!(
-            group.items[0].kind,
-            ChangeKind::Changed { .. }
-        ));
+        assert!(matches!(group.items[0].kind, ChangeKind::Changed { .. }));
     }
 }
