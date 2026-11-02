@@ -222,7 +222,12 @@ impl Hub {
 
     /// Removes and returns the threads waiting on `key`.
     fn take_waiters(&self, key: SignalKey) -> Vec<SignalWaiter> {
-        let taken = self.waiters.borrow_mut().remove(&key);
+        let mut all = self.waiters.borrow_mut();
+        // Every fire comes here, and usually nothing waits on anything: no need to hash the key.
+        if all.is_empty() {
+            return Vec::new();
+        }
+        let taken = all.remove(&key);
         if taken.is_some() {
             self.stale.set(true);
         }
