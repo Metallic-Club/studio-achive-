@@ -22,6 +22,7 @@ graph LR
   animed --> studio
   egui[egui] --> uitheme[metallic_ui_theme]
   tokens[metallic_tokens] --> uitheme
+  tokens -- presentation --> runtime
   uitheme --> studio
   uitheme --> animed
   uitheme --> vfxed[metallic_vfx_editor]
@@ -279,8 +280,8 @@ apps.
   surface, egui-wgpu for the GUI pass, gilrs for gamepads, headless mode for smoke tests (no window, no GPU).
   `devices.rs` holds the winit key and mouse mapping and the gilrs `GamepadSource` (the mapping table of spec 4.2); both
   produce `RawEvent`s for the runtime. `menu/` is the Player menu (#254): Resume, Controls, Leave game. The Controls
-  page (`menu/controls.rs` state, `menu/paint.rs` drawing in a separate egui pass `menu/layer.rs`, glyph art in
-  `menu/glyph_paint.rs`, the in-play hint in `menu/hud.rs`) takes raw events while open, so it works with keyboard,
+  page (`menu/controls.rs` state, `menu/paint.rs` drawing in a separate egui pass `menu/layer.rs`, glyph art from
+  `metallic_runtime::input::glyph_paint`) takes raw events while open, so it works with keyboard,
   mouse or gamepad alone. `controls_store.rs` and `data_dir.rs` load and save the overrides per game in the Player's
   own data folder (`%APPDATA%\MetallicPlayer`, `METALLIC_PLAYER_DATA_DIR` overrides it).
   `touch_overlay.rs` connects the automatic touch controls to winit: real touches, device emulation (the window takes
@@ -538,7 +539,12 @@ Game::frame(&FrameInput, dt)      unchanged; MoveInput and the camera read Frame
   meets every group) and Swap/Replace. Accessibility: per-action toggle, toggle every hold action, hold to press,
   hold-time scale, per-stick sensitivity, dead zone and invert. `glyph.rs` maps controls to drawn glyphs (keycaps,
   mouse, Letters and Positions face buttons; no brand art); `InputRuntime::glyph(s)` caches them per action and
-  device, and `glyph_changes()` counts changes of device, binding or style.
+  device, and `glyph_changes()` counts changes of device, binding or style. `glyph_paint.rs` draws them with an egui
+  painter (colours from `metallic_tokens`, behind `presentation`). `ControlsHint` (`controls_hint.rs`) is the key-cap
+  plate, Move, Jump, Run, Camera and Menu, for 8 s at the start and after a glyph change: `update(&InputRuntime, now)`
+  once a frame, then `paint(&Painter, now)` at the bottom left of the painter's clip rectangle. It only paints and
+  takes no input. The Player draws it over its window while the menu is closed (#254); Studio's `LocalPlaySession`
+  draws it in the viewport over the ScreenGuis, from the session's own `InputRuntime` and clock (#494).
 - **Touch** (#252, spec 7, `input/touch/`). `TouchSet` picks the controls on every load: a Direction2D action with
   `ShowOnTouch` gets the stick or the look pad (`TouchSlot`, role, context priority), Bool actions get buttons sorted by
   `TouchOrder` (at most 6, plus the menu button for role `Menu`). The runtime adds implicit bindings: `TouchStick`

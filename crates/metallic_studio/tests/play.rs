@@ -667,3 +667,59 @@ fn every_action_outside_play_safe_is_locked_while_playing() {
             .is_some_and(|a| a.is_enabled(&ui.state))
     );
 }
+
+/// Where the controls plate's "Jump" is painted this frame: its clip rectangle and its bounds.
+fn plate_word(h: &Harness<'static, EditorUi>) -> Option<(egui::Rect, egui::Rect)> {
+    h.output()
+        .shapes
+        .iter()
+        .find_map(|clipped| match &clipped.shape {
+            egui::Shape::Text(text) if text.galley.text() == "Jump" => {
+                Some((clipped.clip_rect, clipped.shape.visual_bounding_rect()))
+            }
+            _ => None,
+        })
+}
+
+/// The Player's controls plate in Studio (#494): only while playing, inside the viewport, for
+/// 8 s of play, and the pointer over it still belongs to the game.
+#[test]
+fn play_draws_the_controls_plate_in_the_viewport() {
+    let output = OutputPanel::new();
+    let (state, _) = editor("", &output.log);
+    let mut h = harness(state, output);
+    assert_eq!(plate_word(&h), None, "not while editing");
+
+    h.key_press(egui::Key::F5);
+    h.run_steps(2);
+    assert!(h.state().state.play.is_playing());
+    let viewport = h.state().viewport.rect();
+    let (clip, word) = plate_word(&h).expect("the plate at the start");
+    assert_eq!(clip, viewport, "cut to the viewport, so never over a panel");
+    assert!(viewport.contains_rect(word), "{word:?} in {viewport:?}");
+    assert!(
+        word.center().y > viewport.center().y,
+        "at the bottom of the viewport"
+    );
+
+    h.hover_at(word.center());
+    h.run_steps(2);
+    assert!(
+        h.state().viewport.play_hovered(),
+        "the pointer over the plate is still over the game"
+    );
+
+    h.state_mut().state.play.update(8.5);
+    h.run_steps(2);
+    assert!(h.state().state.play.is_playing());
+    assert_eq!(plate_word(&h), None, "gone after 8 s");
+
+    h.key_press(egui::Key::Escape);
+    h.run_steps(2);
+    assert!(!h.state().state.play.is_playing());
+    assert_eq!(plate_word(&h), None, "not after Stop");
+
+    h.key_press(egui::Key::F5);
+    h.run_steps(2);
+    assert!(plate_word(&h).is_some(), "a new session shows it again");
+}

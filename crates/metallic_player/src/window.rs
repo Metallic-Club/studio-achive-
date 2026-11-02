@@ -3,7 +3,7 @@ use crate::args::Args;
 use crate::capture::CaptureTarget;
 use crate::controls_store::Controls;
 use crate::devices::{GamepadSource, key_control, mouse_control};
-use crate::menu::{ControlsHint, Menu, MenuOutcome, UiLayer};
+use crate::menu::{Menu, MenuOutcome, UiLayer};
 use crate::overlay::Overlay;
 use crate::pacing::{Pace, WindowState};
 use crate::touch_overlay::{TouchOverlay, emulation_window};
@@ -12,7 +12,8 @@ use metallic_render::{Camera, RenderContext, RenderSettings, Renderer};
 use metallic_runtime::HumanoidState;
 use metallic_runtime::gui_input::{PointerId, PointerPhase};
 use metallic_runtime::input::{
-    ActionId, Control, Device, DeviceKind, FingerEvent, MENU_ACTION, RawEvent, ScriptedSource,
+    ActionId, Control, ControlsHint, Device, DeviceKind, FingerEvent, MENU_ACTION, RawEvent,
+    ScriptedSource,
 };
 use metallic_runtime::{FrameInput, Game, InputRuntime, TICK};
 use std::path::PathBuf;
@@ -567,7 +568,9 @@ fn paint_ui(
     if menu.is_open() {
         menu.paint(ctx, input);
     } else {
-        hint.paint(ctx, input, clock);
+        hint.update(input, clock);
+        let layer = egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("metallic_hud"));
+        hint.paint(&ctx.layer_painter(layer), clock);
     }
 }
 

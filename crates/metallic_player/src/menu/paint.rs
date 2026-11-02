@@ -4,13 +4,13 @@ use super::controls::{
     CONTENT_W, CellArt, Choice, ControlsPage, HOLD_X, Item, Mode, ResetKind, Row, RowKind, SLOT_X,
     SliderId, Tab, segments_rect,
 };
-use super::glyph_paint::{Ink, paint_control, paint_glyph};
 use super::{MainItem, theme};
 use egui::{
     Align2, Color32, CornerRadius, FontId, LayerId, Order, Painter, Pos2, Rect, Shape, Stroke,
     StrokeKind, pos2, vec2,
 };
 use metallic_runtime::input::glyph::{ControlGlyph, GamepadStyle, control_glyph};
+use metallic_runtime::input::glyph_paint::{Ink, control_width, paint_control, paint_glyph};
 use metallic_runtime::input::overrides::GamepadGlyphPref;
 use metallic_runtime::input::rebind::LISTEN_TIMEOUT;
 use metallic_runtime::input::touch::StickMode;
@@ -106,7 +106,7 @@ fn hints(p: &Painter, right: f32, y: f32, items: &[(ControlGlyph, &str)]) {
         x -= text.size().x;
         p.galley(pos2(x, y - text.size().y / 2.0), text, theme::TEXT_2);
         x -= 8.0;
-        let w = super::glyph_paint::control_width(p, g, h);
+        let w = control_width(p, g, h);
         x -= w;
         paint_control(
             p,
@@ -238,7 +238,7 @@ pub fn controls_page(
             control_glyph(Control::E, style),
         ),
     };
-    let gw = super::glyph_paint::control_width(&p, &prev, 22.0);
+    let gw = control_width(&p, &prev, 22.0);
     paint_control(
         &p,
         Rect::from_min_size(pos2(x, tabs_y + 7.0), vec2(gw, 22.0)),
@@ -277,7 +277,7 @@ pub fn controls_page(
         x = tr.right() + 6.0;
     }
     x += 4.0;
-    let gw = super::glyph_paint::control_width(&p, &next, 22.0);
+    let gw = control_width(&p, &next, 22.0);
     paint_control(
         &p,
         Rect::from_min_size(pos2(x, tabs_y + 7.0), vec2(gw, 22.0)),
@@ -762,8 +762,7 @@ fn paint_cell(
                     );
                     match part {
                         Some(c) => {
-                            let w =
-                                super::glyph_paint::control_width(p, c, 22.0).min(r.width() - 4.0);
+                            let w = control_width(p, c, 22.0).min(r.width() - 4.0);
                             paint_control(
                                 p,
                                 Rect::from_center_size(gr.center(), vec2(w, 22.0)),

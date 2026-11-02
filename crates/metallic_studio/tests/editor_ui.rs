@@ -468,6 +468,47 @@ fn ctrl_w_does_nothing_while_a_text_field_has_focus() {
     );
 }
 
+/// Properties labels share the centre line of the control beside them: single fields, vector
+/// rows, the first row of a CFrame group, dropdowns, checkboxes and attribute rows.
+#[test]
+fn properties_labels_are_centred_on_their_controls() {
+    use egui::accesskit::Role;
+    let (ui, _model, part) = editor();
+    let mut h = harness(ui);
+    let state = &mut h.state_mut().state;
+    state.selection.select_only(part);
+    state
+        .world
+        .set_attribute(part, "Score", Value::Number(1.0))
+        .unwrap();
+    h.run_steps(2);
+    for (label, role) in [
+        ("Name", Role::TextInput),
+        ("PivotOffset", Role::SpinButton),
+        ("Material", Role::ComboBox),
+        ("Transparency", Role::SpinButton),
+        ("Shape", Role::ComboBox),
+        ("Style", Role::Button),
+        ("Orientation", Role::SpinButton),
+        ("Size", Role::SpinButton),
+        ("Anchored", Role::CheckBox),
+        ("Score", Role::SpinButton),
+    ] {
+        let shown = h.get_by_label(label).rect();
+        let y = shown.center().y;
+        let nearest = h
+            .get_all_by_role(role)
+            .filter(|n| n.rect().left() > shown.right())
+            .map(|n| n.rect().center().y)
+            .min_by(|a, b| (a - y).abs().total_cmp(&(b - y).abs()))
+            .unwrap();
+        assert!(
+            (nearest - y).abs() <= 0.5,
+            "{label}: label centre {y}, control centre {nearest}"
+        );
+    }
+}
+
 #[test]
 fn global_keys_wait_during_a_properties_scrub_and_esc_cancels_it() {
     let (ui, _model, part) = editor();

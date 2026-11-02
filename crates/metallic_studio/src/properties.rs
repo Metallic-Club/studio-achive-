@@ -482,6 +482,8 @@ impl Properties {
         .show(ui, |ui| {
             for (name, value) in &attributes {
                 ui.horizontal(|ui| {
+                    // As in `row`: the label shares the centre line of the control after it.
+                    ui.set_min_height(number::height(ui));
                     ui.label(name.as_str());
                     match value {
                         Value::Bool(b) => {
@@ -603,7 +605,9 @@ impl Properties {
         let playing = state.play.is_playing();
         let hover_bg = ui.painter().add(egui::Shape::Noop);
         let row = ui.horizontal(|ui| {
-            ui.set_min_height(crate::theme::ROW_HEIGHT);
+            // As tall as a control from the start: a row grows only downwards, so a label placed
+            // before a taller control would otherwise sit above the control's centre line.
+            ui.set_min_height(number::height(ui));
             // Names sit left aligned in a fixed column (about 40 % of the default panel).
             let label_w = ui_tokens().label_width;
             ui.allocate_ui_with_layout(
@@ -671,6 +675,9 @@ impl Properties {
                     }
                     (Value::String(s), Some(allowed)) => {
                         let mut chosen = s.clone();
+                        // The arrow's cell is no taller than the text, so the box is as tall as a
+                        // number field and the row keeps one centre line.
+                        ui.spacing_mut().icon_width = ui.text_style_height(&egui::TextStyle::Body);
                         egui::ComboBox::from_id_salt(p.name)
                             .selected_text(&chosen)
                             .show_ui(ui, |ui| {

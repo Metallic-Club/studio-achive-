@@ -7,7 +7,7 @@ publish.workspace = true
 
 [features]
 default = ["presentation"]
-presentation = ["dep:metallic_render", "dep:egui", "dep:wgpu"]
+presentation = ["dep:metallic_render", "dep:metallic_tokens", "dep:egui", "dep:wgpu"]
 
 [dependencies]
 metallic_anim = { path = "../metallic_anim" }
@@ -17,6 +17,8 @@ metallic_core.workspace = true
 metallic_physics.workspace = true
 metallic_script.workspace = true
 metallic_render = { workspace = true, optional = true }
+# Colours and radii of the glyphs and the controls plate.
+metallic_tokens = { workspace = true, optional = true }
 # egui's bundled fonts (OFL-1.1 / Ubuntu-font-1.0, Ruling R11; texts in LICENSES/).
 egui = { version = "0.37.0", default-features = false, features = ["default_fonts"], optional = true }
 serde = { version = "1.0.229", features = ["derive"] }
@@ -26,7 +28,6 @@ wgpu = { version = "30.0.1", optional = true }
 toml = "1.1.8"
 
 [dev-dependencies]
-metallic_tokens.workspace = true
 png = "0.18.1"
 tempfile = "3"
 criterion.workspace = true

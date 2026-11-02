@@ -7,14 +7,11 @@
 //! Delete or X to clear, R or Y to reset a row / undo), mouse hover and clicks, or, while a slot
 //! listens, into the control to bind. Everything is reachable without a mouse.
 mod controls;
-pub mod glyph_paint;
-mod hud;
 mod layer;
 mod paint;
 pub mod theme;
 
 pub use controls::{ControlsPage, Nav, Tab};
-pub use hud::ControlsHint;
 pub use layer::UiLayer;
 
 use metallic_runtime::input::glyph::{GamepadStyle, auto_gamepad_style};

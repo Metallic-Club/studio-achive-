@@ -31,7 +31,9 @@
 //! - [`rebind`]: the Controls page's rules: rows by `RebindGroup`, what a slot takes while
 //!   listening, conflicts with Swap / Replace / Cancel, `Required` and `Menu`.
 //! - [`glyph`]: how a binding looks (keycaps, mouse, a generic gamepad in Letters or Positions
-//!   style); [`InputRuntime::glyphs`] caches them per action and device.
+//!   style); [`InputRuntime::glyphs`] caches them per action and device. [`glyph_paint`] draws them
+//!   with an egui painter, and [`ControlsHint`] is the key-cap plate (Move, Jump, Run, Camera, Menu)
+//!   the Player and Studio's Play both show at the start and after a glyph change.
 //! - [`touch`]: the automatic touch controls (spec 7): which actions get a stick, a look pad or
 //!   a button, the layout rule, finger routing and the overlay's drawing. Fingers become
 //!   `Device::Touch` events on `TouchStick`, `TouchLook` and `TouchButton1` to `TouchButton7`.
@@ -39,7 +41,9 @@
 
 mod config;
 mod control;
+mod controls_hint;
 pub mod glyph;
+pub mod glyph_paint;
 mod local_input;
 pub mod overrides;
 pub mod rebind;
@@ -62,6 +66,7 @@ pub use control::{
     CONTROL_COUNT, Control, ControlKind, Device, DeviceKind, InputQueue, MAX_GAMEPADS,
     QUEUE_CAPACITY, RawEvent, RawSource, TOUCH_BUTTON_SLOTS,
 };
+pub use controls_hint::ControlsHint;
 pub use glyph::{GamepadStyle, Glyph};
 pub use overrides::{OverrideStore, PlayerOverrides, Slot, TouchSettings};
 pub use runtime::{ActionEvent, ActionEventKind, ActionId, ActionValue, InputRuntime};

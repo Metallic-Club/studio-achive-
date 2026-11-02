@@ -23,7 +23,8 @@
 //! While a session runs, [`PlayController::is_playing`] is true and editing commands are disabled.
 //!
 //! [`LocalPlayMode`] is Play (#11, F5): a [`LocalPlaySession`] runs the real Game in this
-//! process, client and server combined like the Player, and is its own [`PlayView`].
+//! process, client and server combined like the Player, and is its own [`PlayView`]. Over the game
+//! it draws the Player's controls plate ([`metallic_runtime::input::ControlsHint`]).
 //! [`input::PlayInput`] turns the editor's egui input into the game's raw events.
 pub mod input;
 mod local;
@@ -105,7 +106,8 @@ pub trait PlayView {
     /// Brings `renderer` up to date with the play world and draws it into `target` (`size` in
     /// pixels) with the game camera.
     fn render(&self, renderer: &mut Renderer, target: &wgpu::TextureView, size: (u32, u32));
-    /// Paints the local player's ScreenGuis into `painter`'s clip rectangle.
+    /// Paints the local player's ScreenGuis and the controls plate into `painter`'s clip rectangle
+    /// (the viewport). It only paints, so it takes no input.
     fn paint_gui(&self, painter: &egui::Painter);
     /// Lends the play world read-only for the duration of `inspect` (Explorer's play tree). Does
     /// nothing after Stop or while the world is borrowed.

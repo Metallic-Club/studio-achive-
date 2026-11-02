@@ -1,16 +1,39 @@
-//! Paints the engine's glyphs ([`metallic_runtime::input::glyph`]) as vector shapes and text.
+//! Paints the engine's glyphs ([`super::glyph`]) as vector shapes and text, for the Player menu and
+//! the controls plate ([`super::ControlsHint`]) in the Player and in Studio's Play.
 //!
 //! All art here is drawn from scratch for Metallic: rounded keycaps, a plain mouse outline, and the
 //! parts of a generic gamepad (round face buttons, a diamond of positions, bumpers, triggers,
 //! sticks, a cross-shaped d-pad, two small centre buttons). Monochrome graphite and silver only;
 //! no logos, word marks, product names, controller outlines or face-button colour schemes.
-use super::theme;
+use super::glyph::{ControlGlyph, Dir, FacePos, Glyph, GlyphArt, MousePart, Side};
 use egui::epaint::{CircleShape, PathShape, PathStroke};
 use egui::{Align2, Color32, CornerRadius, FontId, Painter, Pos2, Rect, Shape, Stroke, StrokeKind};
 use egui::{pos2, vec2};
-use metallic_runtime::input::glyph::{
-    ControlGlyph, Dir, FacePos, Glyph, GlyphArt, MousePart, Side,
-};
+use metallic_tokens::consts as tokens;
+
+/// An opaque design token as an egui colour.
+const fn color([r, g, b, _]: [u8; 4]) -> Color32 {
+    Color32::from_rgb(r, g, b)
+}
+
+/// `role.bg-deep`: the base under a keycap.
+const BG_DEEP: Color32 = color(tokens::BG_DEEP);
+/// `role.bg-base`: dimmed faces.
+const BG_BASE: Color32 = color(tokens::BG_BASE);
+/// `role.bg-raised`: keycap faces.
+pub(super) const BG_RAISED: Color32 = color(tokens::BG_RAISED);
+/// `role.line-strong`: dimmed outlines.
+const LINE_STRONG: Color32 = color(tokens::LINE_STRONG);
+/// `role.line-control`: keycap and control outlines.
+pub(super) const LINE_CONTROL: Color32 = color(tokens::LINE_CONTROL);
+/// `role.text-1`.
+pub(super) const TEXT_1: Color32 = color(tokens::TEXT_1);
+/// `role.text-2`.
+pub(super) const TEXT_2: Color32 = color(tokens::TEXT_2);
+/// `role.text-3`.
+pub(super) const TEXT_3: Color32 = color(tokens::TEXT_3);
+/// `role.warning`: unbound slots.
+const WARNING: Color32 = color(tokens::WARNING);
 
 /// Colours of one glyph.
 #[derive(Debug, Clone, Copy)]
@@ -28,17 +51,17 @@ pub struct Ink {
 impl Ink {
     /// The normal look.
     pub const NORMAL: Ink = Ink {
-        line: theme::LINE_CONTROL,
-        face: theme::BG_RAISED,
-        fill: theme::TEXT_1,
-        text: theme::TEXT_1,
+        line: LINE_CONTROL,
+        face: BG_RAISED,
+        fill: TEXT_1,
+        text: TEXT_1,
     };
     /// Dimmed (disabled rows).
     pub const DIM: Ink = Ink {
-        line: theme::LINE_STRONG,
-        face: theme::BG_BASE,
-        fill: theme::TEXT_3,
-        text: theme::TEXT_3,
+        line: LINE_STRONG,
+        face: BG_BASE,
+        fill: TEXT_3,
+        text: TEXT_3,
     };
 }
 
@@ -111,7 +134,7 @@ pub fn paint_glyph(p: &Painter, rect: Rect, g: &Glyph, ink: Ink) -> f32 {
                 Align2::CENTER_CENTER,
                 &g.text,
                 FontId::proportional(h * 0.42),
-                theme::WARNING,
+                WARNING,
             );
             glyph_width(p, g, h)
         }
@@ -151,8 +174,8 @@ pub fn paint_glyph(p: &Painter, rect: Rect, g: &Glyph, ink: Ink) -> f32 {
                     None => {
                         p.rect_stroke(
                             at[i],
-                            theme::R_XS,
-                            Stroke::new(1.0, theme::WARNING),
+                            tokens::R_XS,
+                            Stroke::new(1.0, WARNING),
                             StrokeKind::Inside,
                         );
                     }
@@ -279,9 +302,15 @@ pub fn paint_control(p: &Painter, r: Rect, g: &ControlGlyph, ink: Ink) {
 fn keycap(p: &Painter, r: Rect, ink: Ink) {
     let r = r.shrink(0.5);
     // A slightly darker base under the face gives the cap its height.
-    p.rect_filled(r, theme::R_XS, theme::BG_DEEP);
+    p.rect_filled(r, tokens::R_XS, BG_DEEP);
     let face = Rect::from_min_max(r.min, pos2(r.max.x, r.max.y - r.height() * 0.1));
-    p.rect(face, theme::R_XS, ink.face, stroke(ink), StrokeKind::Inside);
+    p.rect(
+        face,
+        tokens::R_XS,
+        ink.face,
+        stroke(ink),
+        StrokeKind::Inside,
+    );
 }
 
 fn side_letter(p: &Painter, at: Pos2, size: f32, side: Side, ink: Ink) {

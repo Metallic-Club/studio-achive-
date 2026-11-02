@@ -7,7 +7,7 @@ use std::sync::Arc;
 use eframe::egui;
 use metallic_core::World;
 use metallic_render::Renderer;
-use metallic_runtime::input::RawEvent;
+use metallic_runtime::input::{ControlsHint, RawEvent};
 use metallic_runtime::{FrameInput, FrameOutput, Game, InputRuntime, ProjectConfig, RuntimeError};
 
 use super::{PlayMode, PlaySession, PlayStart, PlayStatus, PlayView};
@@ -68,6 +68,8 @@ impl Drop for ActiveGame {
 pub struct LocalPlaySession {
     game: Option<ActiveGame>,
     input: InputRuntime,
+    /// The controls plate, drawn over the game (from this session's `input`, on its clock).
+    hint: ControlsHint,
     /// Seconds of input clock since start (the sum of update frame times).
     clock: f64,
 }
@@ -94,6 +96,7 @@ impl LocalPlaySession {
         Ok(Self {
             game: Some(game),
             input,
+            hint: ControlsHint::new(),
             clock: 0.0,
         })
     }
@@ -138,6 +141,7 @@ impl PlaySession for LocalPlaySession {
         self.clock += dt;
         let input = game.0.input_frame(&mut self.input, self.clock, dt as f32);
         game.0.frame(&input, dt);
+        self.hint.update(&self.input, self.clock);
     }
 
     fn status(&self) -> PlayStatus {
@@ -184,6 +188,7 @@ impl PlayView for LocalPlaySession {
     fn paint_gui(&self, painter: &egui::Painter) {
         if let Some(game) = &self.game {
             game.0.paint_gui(painter);
+            self.hint.paint(painter, self.clock);
         }
     }
 
@@ -196,6 +201,7 @@ impl PlayView for LocalPlaySession {
 mod tests {
     use super::*;
     use crate::output::OutputLog;
+    use metallic_runtime::input::DeviceKind;
 
     fn pending_session() -> LocalPlaySession {
         let mut world = World::new_with_services();
@@ -245,5 +251,84 @@ mod tests {
         }));
         assert!(result.is_err());
         assert!(weak.upgrade().is_none());
+    }
+
+    fn parkour() -> World {
+        let scene = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../templates/parkour/main.mscene");
+        metallic_core::load_scene(&scene).expect("Parkour scene")
+    }
+
+    /// True when `session` paints the controls plate now.
+    fn paints_plate(session: &LocalPlaySession) -> bool {
+        let ctx = egui::Context::default();
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            PlayView::paint_gui(session, ui.painter());
+        });
+        out.textures_delta.clear();
+        out.shapes
+            .iter()
+            .any(|c| matches!(&c.shape, egui::Shape::Text(t) if t.galley.text() == "Jump"))
+    }
+
+    /// At the start, gone after 8 s, back after a glyph change, never after Stop (#494).
+    #[test]
+    fn controls_plate_follows_the_session_clock_and_glyph_changes() {
+        let log = OutputLog::new(8);
+        let mut session = LocalPlaySession::start("Parkour", &parkour(), log.sink()).unwrap();
+        PlaySession::update(&mut session, metallic_runtime::TICK);
+        assert_eq!(session.hint.opacity(session.clock), Some(1.0));
+        assert!(paints_plate(&session), "at the start");
+
+        PlaySession::update(&mut session, 7.0);
+        assert!(paints_plate(&session), "still there before 8 s");
+        PlaySession::update(&mut session, 1.5);
+        assert!(!paints_plate(&session), "gone after 8 s");
+        PlaySession::update(&mut session, metallic_runtime::TICK);
+        assert!(!paints_plate(&session), "and it stays gone");
+
+        session.input.set_forced_device(Some(DeviceKind::Gamepad));
+        PlaySession::update(&mut session, metallic_runtime::TICK);
+        assert!(paints_plate(&session), "back after a glyph change");
+        assert_eq!(session.hint.rows()[0].0.text, "Left Stick");
+        PlaySession::update(&mut session, 8.5);
+        assert!(!paints_plate(&session), "and gone again");
+
+        session
+            .input
+            .set_forced_device(Some(DeviceKind::KeyboardMouse));
+        PlaySession::update(&mut session, metallic_runtime::TICK);
+        assert!(paints_plate(&session));
+        session.stop();
+        assert!(!paints_plate(&session), "hidden when not playing");
+    }
+
+    /// Studio's plate has the rows the Player's has: both come from an `InputRuntime` of the same
+    /// scene (the Player without overrides, as `--no-overrides` runs).
+    #[test]
+    fn parkour_rows_are_the_players_rows() {
+        let world = parkour();
+        let mut player = ControlsHint::new();
+        player.update(&InputRuntime::from_world(&world), 0.0);
+        let log = OutputLog::new(8);
+        let mut session = LocalPlaySession::start("Parkour", &world, log.sink()).unwrap();
+        PlaySession::update(&mut session, metallic_runtime::TICK);
+        assert_eq!(session.hint.rows(), player.rows());
+        let rows: Vec<(&str, &str)> = session
+            .hint
+            .rows()
+            .iter()
+            .map(|(g, word)| (g.text.as_str(), *word))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                ("W A S D", "Move"),
+                ("Space", "Jump"),
+                ("Left Shift", "Run"),
+                ("Right Click", "Camera"),
+                ("Esc", "Menu"),
+            ]
+        );
     }
 }
