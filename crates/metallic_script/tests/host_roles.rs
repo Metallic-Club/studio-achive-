@@ -1,14 +1,13 @@
 //! Role, ownership and player lifecycle behavior through the public host and real Luau.
 mod common;
 
-use common::{Rig, TEST_RESUME_BUDGET};
+use common::Rig;
 use metallic_core::{InstanceId, Value};
 use metallic_script::{GuiEvent, GuiEventKind, GuiPointer, ScriptHost, ScriptRole};
 
 fn rig(role: ScriptRole) -> Rig {
     let mut rig = Rig::new();
     rig.host = ScriptHost::with_role(rig.world.clone(), rig.out.clone(), role);
-    rig.host.set_resume_budget(TEST_RESUME_BUDGET);
     rig
 }
 
@@ -646,6 +645,8 @@ end)
 #[test]
 fn synchronous_removal_uses_one_aggregate_budget_for_independent_owners() {
     let mut rig = rig(ScriptRole::Server);
+    rig.host
+        .set_step_budget_sec(metallic_script::STEP_BUDGET_SEC);
     for index in 0..8 {
         rig.server_script(&format!("Owner{index}"), SLOW_REMOVING_HANDLER);
     }
@@ -676,6 +677,8 @@ fn synchronous_removal_uses_one_aggregate_budget_for_independent_owners() {
 #[test]
 fn removal_preserves_a_held_input_budget_instead_of_resetting_it() {
     let mut rig = rig(ScriptRole::Combined);
+    rig.host
+        .set_step_budget_sec(metallic_script::STEP_BUDGET_SEC);
     for index in 0..8 {
         rig.local_script(&format!("Owner{index}"), SLOW_REMOVING_HANDLER);
     }
@@ -705,6 +708,8 @@ fn removal_preserves_a_held_input_budget_instead_of_resetting_it() {
 #[test]
 fn input_dispatch_does_not_resume_deferred_work_after_gui_ownership_changes() {
     let mut rig = rig(ScriptRole::Client);
+    rig.host
+        .set_step_budget_sec(metallic_script::STEP_BUDGET_SEC);
     let local = player(&rig, "Local");
     let other = player(&rig, "Other");
     let leaving = player(&rig, "Leaving");
@@ -807,6 +812,8 @@ fn lifecycle_dispatch_does_not_call_handlers_after_gui_ownership_changes() {
 #[test]
 fn client_input_dispatch_postpones_lua_when_world_scope_is_borrowed() {
     let mut rig = rig(ScriptRole::Client);
+    rig.host
+        .set_step_budget_sec(metallic_script::STEP_BUDGET_SEC);
     let local = player(&rig, "Local");
     let leaving = player(&rig, "Leaving");
     let owned_gui = gui(&rig, local);

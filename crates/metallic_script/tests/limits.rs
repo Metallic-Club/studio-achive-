@@ -166,6 +166,8 @@ fn too_many_connections_on_one_signal() {
 fn many_spinning_handlers_do_not_stall_a_step() {
     let _isolation = isolate_limits_test();
     let mut rig = Rig::new();
+    rig.host
+        .set_step_budget_sec(metallic_script::STEP_BUDGET_SEC);
     rig.host.set_resume_budget(metallic_script::RESUME_BUDGET);
     let ws = rig.root("Workspace");
     let pad = rig.add("Part", "Pad", ws);
@@ -461,6 +463,8 @@ fn cloned_scripts_with_same_name_stop_independently() {
 fn full_deferral_queue_stops_building_arguments() {
     let _isolation = isolate_limits_test();
     let mut rig = Rig::new();
+    rig.host
+        .set_step_budget_sec(metallic_script::STEP_BUDGET_SEC);
     rig.server_script(
         "Many",
         r#"

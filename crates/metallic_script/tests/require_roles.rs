@@ -2,14 +2,13 @@
 
 mod common;
 
-use common::{Rig, TEST_RESUME_BUDGET};
+use common::Rig;
 use metallic_core::{InstanceId, Value};
 use metallic_script::{ScriptHost, ScriptRole};
 
 fn rig(role: ScriptRole) -> Rig {
     let mut rig = Rig::new();
     rig.host = ScriptHost::with_role(rig.world.clone(), rig.out.clone(), role);
-    rig.host.set_resume_budget(TEST_RESUME_BUDGET);
     rig
 }
 

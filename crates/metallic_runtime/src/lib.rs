@@ -57,6 +57,7 @@ pub use game::{FrameOutput, Game};
 pub use input::{FrameInput, InputRuntime};
 pub use local_input::{LocalInput, move_direction};
 pub use metallic_physics::HumanoidState;
+pub use metallic_script::use_test_budgets_if_a_test_asked;
 pub use project::ProjectConfig;
 pub use simulation::{
     MAX_FRAME_DT, MoveInput, PlayerInput, RUN_MULTIPLIER, Simulation, StdoutSink, TICK, TICK_RATE,

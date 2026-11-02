@@ -611,7 +611,12 @@ impl StylePicker {
                 self.focus = i;
                 let waited = now.duration_since(since);
                 if waited >= HOVER_DELAY {
-                    if self.previewing.map(|(p, _)| p) != Some(i) {
+                    // A tile that already is the targets' value has nothing to preview. An empty
+                    // preview would still open a gesture, and Undo waits for gestures: after a
+                    // click on a tile, with the pointer still on it, Undo would do nothing.
+                    if self.previewing.map(|(p, _)| p) != Some(i)
+                        && current_tile(&state.world, &self.targets(state)) != Some(i)
+                    {
                         self.preview(state, i, false);
                     }
                 } else {

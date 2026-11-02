@@ -42,6 +42,7 @@ impl Run {
             )
             .unwrap();
         let output = Rc::new(Captured::default());
+        metallic_script::use_test_budgets_on_this_thread();
         let mut game = Game::from_world("camera-api".to_owned(), world, output.clone());
         game.start().unwrap();
         Run { game, output }

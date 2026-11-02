@@ -51,6 +51,7 @@ impl Rig {
             .unwrap();
         extra(&mut w);
         let out = Rc::new(Lines::default());
+        metallic_script::use_test_budgets_on_this_thread();
         let mut game = Game::from_world("input".into(), w, out.clone());
         game.start().unwrap();
         let input = InputRuntime::from_world(&game.world().borrow());

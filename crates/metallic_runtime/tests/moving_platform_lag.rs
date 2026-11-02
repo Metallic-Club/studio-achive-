@@ -51,6 +51,7 @@ end)
 "#
     );
     world.set(script, "Source", Value::String(source)).unwrap();
+    metallic_script::use_test_budgets_on_this_thread();
     let mut game = Game::from_world("moving-platform-lag".into(), world, Rc::new(Quiet));
     game.start().unwrap();
     let mut offsets = Vec::new();

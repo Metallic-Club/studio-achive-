@@ -95,6 +95,7 @@ fn teleport(game: &mut Simulation, at: Vec3) {
 #[test]
 fn cpu_simulation_reports_body_part_touches_on_both_sides() {
     let output = Rc::new(Captured::default());
+    metallic_script::use_test_budgets_on_this_thread();
     let mut game = Simulation::from_world("touches".into(), world(), output.clone());
     game.start().unwrap();
     assert_eq!(

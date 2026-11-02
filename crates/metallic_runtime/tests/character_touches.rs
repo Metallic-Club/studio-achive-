@@ -84,6 +84,7 @@ fn teleport(game: &mut Game, at: Vec3) {
 #[test]
 fn game_frame_reports_body_part_touches_on_both_sides() {
     let output = Rc::new(Captured::default());
+    metallic_script::use_test_budgets_on_this_thread();
     let mut game = Game::from_world("touches".into(), world(), output.clone());
     game.start().unwrap();
     run(&mut game, 1.0);
@@ -172,6 +173,7 @@ fn probe_world() -> World {
 #[test]
 fn a_destroyed_or_replaced_character_ends_its_touch_once_in_scripts() {
     let output = Rc::new(Captured::default());
+    metallic_script::use_test_budgets_on_this_thread();
     let mut game = Game::from_world("probe".into(), probe_world(), output.clone());
     game.start().unwrap();
     run(&mut game, 0.5);

@@ -25,6 +25,7 @@ impl OutputSink for Capture {
 }
 
 fn vm() -> (ScriptVm, Rc<Capture>) {
+    metallic_script::use_test_budgets_on_this_thread();
     let sink = Rc::new(Capture::default());
     (
         ScriptVm::with_output(Context::Server, sink.clone()).unwrap(),
@@ -32,9 +33,17 @@ fn vm() -> (ScriptVm, Rc<Capture>) {
     )
 }
 
+/// A VM on the real limits, for the tests of those limits.
+fn strict_vm() -> (ScriptVm, Rc<Capture>) {
+    let (vm, sink) = vm();
+    vm.set_resume_budget(metallic_script::RESUME_BUDGET);
+    vm.set_step_budget_sec(metallic_script::STEP_BUDGET_SEC);
+    (vm, sink)
+}
+
 #[test]
 fn single_quantifier_pathological_find_times_out_or_errors_fast() {
-    let (mut vm, _) = vm();
+    let (mut vm, _) = strict_vm();
     let start = Instant::now();
     for src in [
         "string.find(string.rep('a', 1e6), '.-b')",
@@ -235,7 +244,7 @@ fn budget_errors_cleanly_when_vm_is_gone() {
 
 #[test]
 fn timeout_reported_once() {
-    let (mut vm, sink) = vm();
+    let (mut vm, sink) = strict_vm();
     // A spawned thread times out inside run_script: one error, returned, none in the sink.
     let err = vm
         .run_script("T", "task.spawn(function() while true do end end)")
@@ -265,7 +274,7 @@ fn timeout_reported_once() {
 
 /// Runs `src` and asserts it stops with a pattern/timeout error within 0.5 s (#166).
 fn assert_pattern_stops_fast(src: &str) {
-    let (mut vm, _) = vm();
+    let (mut vm, _) = strict_vm();
     let start = Instant::now();
     let err = vm.run_script("T", src).unwrap_err();
     let took = start.elapsed();
@@ -485,7 +494,7 @@ fn normal_sorts_behave_as_before() {
 #[test]
 fn gsub_replacement_loop_is_bounded() {
     // 1M empty matches x 64 bytes: ~64 MB appended, about 10 s unbounded in a debug build.
-    let (mut vm, _) = vm();
+    let (mut vm, _) = strict_vm();
     let start = Instant::now();
     let err = vm
         .run_script(
@@ -520,7 +529,7 @@ fn back_reference_compares_are_charged() {
 fn gsub_charges_replacement_bytes_scanned_not_only_appended() {
     // '%0' on matches that are all empty appends nothing, yet the 64 MB replacement is walked
     // for every match: 20 matches x 64M bytes.
-    let (mut vm, _) = vm();
+    let (mut vm, _) = strict_vm();
     let start = Instant::now();
     let err = vm
         .run_script(

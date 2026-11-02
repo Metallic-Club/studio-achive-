@@ -1407,6 +1407,7 @@ mod tests {
         let shared = Rc::new(super::super::HostShared::default());
         shared.local_player.set(Some(player));
         let sink: Rc<dyn OutputSink> = Rc::new(Quiet);
+        crate::vm::use_test_budgets_on_this_thread();
         let mut vm = ScriptVm::with_output(Context::Client, sink.clone()).unwrap();
         let state = super::super::install(&vm, world.clone(), shared, sink).unwrap();
         vm.run_script(

@@ -21,6 +21,7 @@ impl OutputSink for Capture {
 
 fn rig() -> (ScriptVm, Rc<Capture>) {
     let output = Rc::new(Capture::default());
+    metallic_script::use_test_budgets_on_this_thread();
     let vm = ScriptVm::with_output(Context::Server, output.clone()).unwrap();
     (vm, output)
 }

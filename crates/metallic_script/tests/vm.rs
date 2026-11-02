@@ -25,11 +25,20 @@ impl OutputSink for Capture {
 }
 
 fn vm() -> (ScriptVm, Rc<Capture>) {
+    metallic_script::use_test_budgets_on_this_thread();
     let sink = Rc::new(Capture::default());
     (
         ScriptVm::with_output(Context::Server, sink.clone()).unwrap(),
         sink,
     )
+}
+
+/// A VM on the real limits, for the tests of those limits.
+fn strict_vm() -> (ScriptVm, Rc<Capture>) {
+    let (vm, sink) = vm();
+    vm.set_resume_budget(metallic_script::RESUME_BUDGET);
+    vm.set_step_budget_sec(metallic_script::STEP_BUDGET_SEC);
+    (vm, sink)
 }
 
 #[test]
@@ -72,7 +81,7 @@ fn forbidden_globals_are_nil() {
 
 #[test]
 fn endless_loop_times_out() {
-    let (mut vm, sink) = vm();
+    let (mut vm, sink) = strict_vm();
     let start = Instant::now();
     let err = vm
         .run_script("Workspace.Loop", "while true do end")
@@ -179,7 +188,7 @@ fn thread_error_goes_to_sink() {
 
 #[test]
 fn timeout_error_has_chunk_prefix() {
-    let (mut vm, sink) = vm();
+    let (mut vm, sink) = strict_vm();
     let err = vm
         .run_script("Workspace.Loop", "local x = 1\n\nwhile true do end")
         .unwrap_err();
@@ -233,7 +242,7 @@ fn table_error_is_formatted_safely() {
 
 #[test]
 fn nested_resume_keeps_outer_budget() {
-    let (mut vm, _) = vm();
+    let (mut vm, _) = strict_vm();
     let budget = vm.budget();
     let host = vm
         .lua()
@@ -252,7 +261,7 @@ fn nested_resume_keeps_outer_budget() {
 
 #[test]
 fn call_with_budget_times_out_and_returns_values() {
-    let (mut vm, _) = vm();
+    let (mut vm, _) = strict_vm();
     let f: Function = vm
         .lua()
         .load("return function(a, b) return a + b end")
@@ -271,7 +280,7 @@ fn call_with_budget_times_out_and_returns_values() {
 
 #[test]
 fn many_threads_cannot_stall_one_step() {
-    let (mut vm, _) = vm();
+    let (mut vm, _) = strict_vm();
     for i in 0..60 {
         vm.run_script(
             &format!("T{i}"),
@@ -294,7 +303,7 @@ fn many_threads_cannot_stall_one_step() {
 
 #[test]
 fn pathological_pattern_is_rejected_or_budgeted() {
-    let (mut vm, _) = vm();
+    let (mut vm, _) = strict_vm();
     let start = Instant::now();
     for src in [
         "string.find(string.rep('a', 100000), 'a-a-a-a-a-b')",
@@ -374,7 +383,7 @@ fn rawset_on_library_fails() {
 
 #[test]
 fn pcall_wrapped_loop_still_times_out() {
-    let (mut vm, _) = vm();
+    let (mut vm, _) = strict_vm();
     let start = Instant::now();
     let err = vm
         .run_script(

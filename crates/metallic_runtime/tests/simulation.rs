@@ -74,6 +74,7 @@ fn floor(world: &mut World) {
 }
 fn simulation(world: World) -> (Simulation, Rc<Capture>) {
     let output = Rc::new(Capture::default());
+    metallic_script::use_test_budgets_on_this_thread();
     let mut simulation = Simulation::from_world("CPU fixture".into(), world, output.clone());
     simulation.start().unwrap();
     (simulation, output)
@@ -382,6 +383,7 @@ fn combined_game_and_server_use_the_same_world_space_movement_kernel() {
         .unwrap();
     spawn_character(&mut server_world, player).unwrap();
     let (mut server, output) = simulation(server_world);
+    metallic_script::use_test_budgets_on_this_thread();
     let mut game = Game::from_world("Combined".into(), base, Rc::new(Capture::default()));
     game.start().unwrap();
     for _ in 0..120 {
@@ -605,6 +607,7 @@ end)
     #[test]
     fn game_and_server_simulation_keep_identical_world_hashes() {
         let game_out = Rc::new(Capture::default());
+        metallic_script::use_test_budgets_on_this_thread();
         let mut game = Game::from_world("Parity".into(), scene(), game_out.clone());
         game.start().unwrap();
 

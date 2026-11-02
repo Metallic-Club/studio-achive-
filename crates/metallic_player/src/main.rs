@@ -48,6 +48,7 @@ use std::process::ExitCode;
 use std::rc::Rc;
 
 fn main() -> ExitCode {
+    metallic_runtime::use_test_budgets_if_a_test_asked();
     let args = match args::Args::parse(std::env::args().skip(1)) {
         Ok(a) => a,
         Err(msg) => {

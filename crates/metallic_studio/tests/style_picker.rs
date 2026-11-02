@@ -190,6 +190,31 @@ fn a_click_applies_one_undo_step_to_the_model() {
     assert_eq!(look(&h, sc.model), "inherit");
 }
 
+/// A person rests on a tile, clicks it and leaves the pointer there: Undo still works, however
+/// long the frames take. Staying on the applied tile used to open an empty preview gesture.
+#[test]
+fn undo_works_while_the_pointer_stays_on_the_applied_tile() {
+    let (ui, sc) = editor();
+    let (mut h, _) = harness(ui);
+    h.state_mut().state.selection.select_only(sc.model);
+    h.run_steps(2);
+    open(&mut h);
+    h.run_steps(2);
+    h.get_by_label(RETRO).hover();
+    h.run_steps(1);
+    std::thread::sleep(Duration::from_millis(170));
+    h.run_steps(2);
+    assert_eq!(h.state().style_picker.previewing(), Some("retro-32"));
+    h.get_by_label(RETRO).click();
+    h.run_steps(2);
+    assert_eq!(h.state().state.history.len(), 1);
+    std::thread::sleep(Duration::from_millis(170));
+    h.run_steps(2);
+    assert!(!h.state().state.gesture_active(), "nothing left to preview");
+    h.state_mut().state.undo();
+    assert_eq!(look(&h, sc.model), "inherit");
+}
+
 #[test]
 fn each_part_writes_every_part_and_the_keyboard_drives_the_tiles() {
     let (ui, sc) = editor();

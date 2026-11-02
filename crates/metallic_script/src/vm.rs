@@ -1,6 +1,7 @@
 //! The sandboxed Luau virtual machine.
 
 use std::borrow::Cow;
+use std::cell::Cell;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -18,8 +19,61 @@ pub const RESUME_BUDGET: Duration = Duration::from_millis(100);
 /// due when it is used up run on the next step.
 pub const STEP_BUDGET_SEC: f64 = 0.25;
 
+/// Resume budget after [`use_test_budgets_on_this_thread`] (60 s).
+pub const TEST_RESUME_BUDGET: Duration = Duration::from_secs(60);
+
+/// Step budget after [`use_test_budgets_on_this_thread`] (60 s).
+pub const TEST_STEP_BUDGET_SEC: f64 = 60.0;
+
 /// Memory cap of one VM (256 MB).
 pub const MEMORY_LIMIT_BYTES: usize = 256 * 1024 * 1024;
+
+thread_local! {
+    static TEST_BUDGETS: Cell<bool> = const { Cell::new(false) };
+}
+
+/// For test rigs: VMs and hosts this thread creates from now on start with
+/// [`TEST_RESUME_BUDGET`] and [`TEST_STEP_BUDGET_SEC`] instead of the real limits.
+///
+/// Both budgets are wall-clock time, so a busy or paging machine can stall a trivial script past
+/// them and a test then fails for no reason. Only a test calls this; nothing in the engine, the
+/// Player or Studio does, so creators always get the real limits. A test of the limits themselves
+/// sets them back on its VM or host, which wins over this: [`ScriptVm::set_resume_budget`] with
+/// [`RESUME_BUDGET`], [`ScriptVm::set_step_budget_sec`] with [`STEP_BUDGET_SEC`].
+///
+/// It is per thread because each `#[test]` normally has its own thread, so a test that does not
+/// ask keeps the real limits. A VM stays on the thread that made it (it is not `Send`).
+pub fn use_test_budgets_on_this_thread() {
+    TEST_BUDGETS.set(true);
+}
+
+/// For the `main` of a binary that tests run as a child process: applies
+/// [`use_test_budgets_on_this_thread`] if the variable `METALLIC_TEST_BUDGETS` is set. The check
+/// exists only in debug builds; a release or `dist` build never reads the variable.
+pub fn use_test_budgets_if_a_test_asked() {
+    #[cfg(debug_assertions)]
+    if std::env::var_os("METALLIC_TEST_BUDGETS").is_some() {
+        use_test_budgets_on_this_thread();
+    }
+}
+
+/// The resume budget a new VM or host starts with.
+pub(crate) fn initial_resume_budget() -> Duration {
+    if TEST_BUDGETS.get() {
+        TEST_RESUME_BUDGET
+    } else {
+        RESUME_BUDGET
+    }
+}
+
+/// The step budget a new VM or host starts with.
+pub(crate) fn initial_step_budget_sec() -> f64 {
+    if TEST_BUDGETS.get() {
+        TEST_STEP_BUDGET_SEC
+    } else {
+        STEP_BUDGET_SEC
+    }
+}
 
 /// Which side of the game a VM belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -298,6 +352,11 @@ pub struct Budget {
 }
 
 impl Budget {
+    /// Seconds one step may spend (see [`ScriptVm::set_step_budget_sec`]).
+    pub(crate) fn step_budget_sec(&self) -> f64 {
+        self.sched.step_budget_sec.get()
+    }
+
     fn lua(&self) -> Result<Lua, ScriptError> {
         self.lua.try_upgrade().ok_or_else(|| ScriptError {
             message: "script VM no longer exists".to_string(),
@@ -525,10 +584,16 @@ impl ScriptVm {
     }
 
     /// Sets how long one resume may run before it times out ([`RESUME_BUDGET`] by default).
-    /// The budget is wall-clock time, so test rigs on loaded machines raise it; tests of the
-    /// timeout itself keep the default.
+    /// Test rigs raise it with [`use_test_budgets_on_this_thread`]; tests of the timeout itself
+    /// set [`RESUME_BUDGET`] here.
     pub fn set_resume_budget(&self, budget: Duration) {
         self.sched.resume_budget.set(budget);
+    }
+
+    /// Sets how many seconds one step may spend before the rest waits for the next step
+    /// ([`STEP_BUDGET_SEC`] by default). See [`use_test_budgets_on_this_thread`].
+    pub fn set_step_budget_sec(&self, seconds: f64) {
+        self.sched.step_budget_sec.set(seconds);
     }
 
     /// Adds (or replaces) a global visible to every script of this VM, e.g. `game` or

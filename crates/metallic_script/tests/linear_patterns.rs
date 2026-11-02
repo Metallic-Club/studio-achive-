@@ -55,6 +55,7 @@ fn replace_bytes(
 
 #[test]
 fn single_byte_patterns_preserve_native_binary_and_magic_behavior() {
+    metallic_script::use_test_budgets_on_this_thread();
     let vm = ScriptVm::new(Context::Server).unwrap();
     let reference = mlua::Lua::new();
     let source: Vec<u8> = (0..=u8::MAX).collect();
@@ -74,6 +75,7 @@ fn single_byte_patterns_preserve_native_binary_and_magic_behavior() {
 
 #[test]
 fn literal_match_start_bounds_keep_native_results() {
+    metallic_script::use_test_budgets_on_this_thread();
     let vm = ScriptVm::new(Context::Server).unwrap();
     let reference = mlua::Lua::new();
     let source = b"\xffa\0a\x80a";
@@ -101,6 +103,7 @@ fn literal_match_start_bounds_keep_native_results() {
 
 #[test]
 fn literal_gsub_maximum_count_and_replacement_bytes_keep_native_results() {
+    metallic_script::use_test_budgets_on_this_thread();
     let vm = ScriptVm::new(Context::Server).unwrap();
     let reference = mlua::Lua::new();
     let source = b"\xffa\0a\x80a";
@@ -146,6 +149,7 @@ fn literal_gsub_maximum_count_and_replacement_bytes_keep_native_results() {
 
 #[test]
 fn literal_patterns_with_function_or_table_replacements_keep_native_results() {
+    metallic_script::use_test_budgets_on_this_thread();
     let vm = ScriptVm::new(Context::Server).unwrap();
     let reference = mlua::Lua::new();
     for replacement in [
@@ -166,6 +170,7 @@ fn literal_patterns_with_function_or_table_replacements_keep_native_results() {
 
 #[test]
 fn literal_gsub_keeps_the_result_cap_even_with_zero_replacements() {
+    metallic_script::use_test_budgets_on_this_thread();
     let vm = ScriptVm::new(Context::Server).unwrap();
     let subject = vm
         .lua()
@@ -189,6 +194,7 @@ fn literal_gsub_keeps_the_result_cap_even_with_zero_replacements() {
 fn native_large_linear_match_completes_without_aggregate_complexity_rejection() {
     // Raw native invocation deliberately has no scheduler deadline: isolate the
     // complexity policy from the separate, unchanged 100 ms script budget.
+    metallic_script::use_test_budgets_on_this_thread();
     let vm = ScriptVm::new(Context::Server).unwrap();
     let subject = large_subject(&vm);
     let function = string_function(&vm, "match");
@@ -200,6 +206,7 @@ fn native_large_linear_match_completes_without_aggregate_complexity_rejection() 
 
 #[test]
 fn native_large_linear_gsub_completes_without_aggregate_complexity_rejection() {
+    metallic_script::use_test_budgets_on_this_thread();
     let vm = ScriptVm::new(Context::Server).unwrap();
     let subject = large_subject(&vm);
     let function = string_function(&vm, "gsub");
@@ -214,6 +221,7 @@ fn native_large_linear_gsub_completes_without_aggregate_complexity_rejection() {
 
 #[test]
 fn native_large_gmatch_search_completes_without_aggregate_complexity_rejection() {
+    metallic_script::use_test_budgets_on_this_thread();
     let vm = ScriptVm::new(Context::Server).unwrap();
     let factory = string_function(&vm, "gmatch");
     let iterator: Function = factory.call((large_subject(&vm), "x")).unwrap();
@@ -225,6 +233,7 @@ fn native_large_gmatch_search_completes_without_aggregate_complexity_rejection()
 
 #[test]
 fn empty_matches_and_iterator_boundaries_keep_native_luau_results() {
+    metallic_script::use_test_budgets_on_this_thread();
     let vm = ScriptVm::new(Context::Server).unwrap();
     let reference = mlua::Lua::new();
     for source in [

@@ -12,7 +12,7 @@ use mlua::{
 };
 
 use crate::debug::{self, DebugCore, Outcome};
-use crate::vm::{OutputSink, RESUME_BUDGET, STEP_BUDGET_SEC, format_error, lossy};
+use crate::vm::{OutputSink, format_error, initial_resume_budget, initial_step_budget_sec, lossy};
 
 /// Text of the error raised when a thread runs out of budget.
 pub(crate) const TIMEOUT_MSG: &str = "Script timeout: exhausted allowed execution time";
@@ -67,8 +67,10 @@ struct Pending {
 pub(crate) struct Scheduler {
     pub(crate) now: Cell<f64>,
     pub(crate) deadline: Cell<Option<Instant>>,
-    /// Time one resume may run ([`RESUME_BUDGET`] unless the host changed it).
+    /// Time one resume may run ([`crate::RESUME_BUDGET`] unless the host changed it).
     pub(crate) resume_budget: Cell<Duration>,
+    /// Time one step may spend ([`crate::STEP_BUDGET_SEC`] unless the host changed it).
+    pub(crate) step_budget_sec: Cell<f64>,
     /// Set by the interrupt hook when the budget ran out: `"<chunk>:<line>: "` of the
     /// running code (possibly empty).
     pub(crate) timeout_loc: RefCell<Option<String>>,
@@ -93,7 +95,8 @@ impl Scheduler {
         Scheduler {
             now: Cell::new(0.0),
             deadline: Cell::new(None),
-            resume_budget: Cell::new(RESUME_BUDGET),
+            resume_budget: Cell::new(initial_resume_budget()),
+            step_budget_sec: Cell::new(initial_step_budget_sec()),
             timeout_loc: RefCell::new(None),
             pending: RefCell::new(Vec::new()),
             threads: RefCell::new(None),
@@ -446,7 +449,7 @@ impl Scheduler {
         Ok(values)
     }
 
-    /// Resumes due threads, stopping early once [`STEP_BUDGET_SEC`] is used up; the rest
+    /// Resumes due threads, stopping early once the step budget is used up; the rest
     /// stay due and run on the next step. Errors go to the sink.
     pub(crate) fn step(&self, now: f64) {
         if self.debug.is_paused() {
@@ -463,7 +466,9 @@ impl Scheduler {
         let started = Instant::now();
         let mut due = due.into_iter();
         while let Some(p) = due.next() {
-            if started.elapsed().as_secs_f64() > STEP_BUDGET_SEC || self.debug.is_paused() {
+            if started.elapsed().as_secs_f64() > self.step_budget_sec.get()
+                || self.debug.is_paused()
+            {
                 let mut pending = self.pending.borrow_mut();
                 pending.push(p);
                 pending.extend(due);
@@ -787,6 +792,7 @@ mod ownership_tests {
 
     fn assert_cancellation_survives_failed_resume(source: &str) {
         let trace = Rc::new(Trace::default());
+        crate::vm::use_test_budgets_on_this_thread();
         let mut vm =
             crate::vm::ScriptVm::with_output(crate::vm::Context::Server, trace.clone()).unwrap();
         let owner = u64::MAX - 17;
