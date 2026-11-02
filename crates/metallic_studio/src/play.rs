@@ -27,6 +27,7 @@
 //! [`input::PlayInput`] turns the editor's egui input into the game's raw events.
 pub mod input;
 mod local;
+pub mod review;
 
 pub use local::{LocalPlayMode, LocalPlaySession, PLAY_TAG};
 

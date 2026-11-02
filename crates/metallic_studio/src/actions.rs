@@ -906,6 +906,26 @@ pub fn default_actions() -> ActionRegistry {
         )
         .enabled(|s| s.play.is_playing()),
     );
+    r.register(
+        Action::new(
+            "play.review",
+            "Review changes from Play",
+            Icon::Play,
+            ToolbarGroup::Hidden,
+            EditorState::toggle_play_review,
+        )
+        .enabled(|s| s.play_review().is_some()),
+    );
+    r.register(
+        Action::new(
+            "play.review_dismiss",
+            "Dismiss changes from Play",
+            Icon::Stop,
+            ToolbarGroup::Hidden,
+            EditorState::dismiss_play_review,
+        )
+        .enabled(|s| s.play_review().is_some()),
+    );
     r
 }
 

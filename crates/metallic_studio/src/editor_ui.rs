@@ -33,6 +33,7 @@ use crate::output::OutputPanel;
 use crate::palette::{Choice, CommandPalette};
 use crate::panel;
 use crate::play::input::PlayInput;
+use crate::play_review;
 use crate::properties::Properties;
 use crate::script_editor::ScriptTabs;
 use crate::style_picker::StylePicker;
@@ -125,6 +126,9 @@ pub struct EditorUi {
     pub palette: CommandPalette,
     /// The last question asked of Litha from the palette, for the Litha panel to take.
     litha_question: Option<String>,
+    /// A dialog is over the editor (Settings, Third-party licences): the app sets this, and Esc
+    /// belongs to the dialog.
+    pub dialog_open: bool,
 }
 
 impl EditorUi {
@@ -161,6 +165,7 @@ impl EditorUi {
             play_tree: PlayTree::new(),
             palette: CommandPalette::new(),
             litha_question: None,
+            dialog_open: false,
         };
         ui.viewport.frame_all(&ui.state);
         ui.sync_hold_keys();
@@ -399,6 +404,33 @@ impl EditorUi {
             self.run_action(id);
         }
         self.pressed = pressed;
+    }
+
+    /// Esc dismisses the offer after Stop, after everything above it had its chance (a drag, a
+    /// popover, the palette, a menu, a text field) and before it would clear the selection. The
+    /// press that stopped Play does not count, however long it is held.
+    fn play_review_keys(&mut self, ctx: &egui::Context) {
+        let dialog = self.dialog_open || self.confirm.is_some();
+        let busy = self.viewport.is_busy()
+            || self.viewport.is_editing_delta()
+            || self.state.gesture_active()
+            || self.palette.is_open()
+            || self.context_bar.has_focus()
+            || ctx.text_edit_focused()
+            || egui::Popup::is_any_open(ctx);
+        let Some(review) = self.state.play_review_mut() else {
+            return;
+        };
+        if !review.esc_ready {
+            review.esc_ready = !ctx.input(|i| i.key_down(egui::Key::Escape));
+            return;
+        }
+        if !dialog
+            && !busy
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        {
+            self.state.dismiss_play_review();
+        }
     }
 
     fn hint(&mut self, event: HintEvent) {
@@ -930,6 +962,16 @@ impl EditorUi {
                 panel::show(ui, "Output", |_| {}, |ui| self.output.ui(ui));
             });
 
+        // The offer after Stop: a strip above Output, in nobody's way (#130).
+        self.state.sync_play_review();
+        if let Some(size) = self.state.play_review().map(play_review::height) {
+            egui::Panel::bottom("play_review")
+                .exact_size(size)
+                .resizable(false)
+                .frame(panel::frame())
+                .show(ui, |ui| play_review::ui(ui, &mut self.state));
+        }
+
         self.drag_keys(&ctx);
         let mut viewport_hovered = false;
         egui::CentralPanel::default()
@@ -1005,6 +1047,7 @@ impl EditorUi {
         {
             self.apply_palette(&ctx, choice);
         }
+        self.play_review_keys(&ctx);
         if !played {
             let right_down = ctx.input(|i| i.pointer.secondary_down());
             self.keys(&ctx, viewport_hovered, right_down);

@@ -67,6 +67,7 @@ pub mod panel;
 pub mod picking;
 pub mod pivot;
 pub mod play;
+pub mod play_review;
 pub mod png_image;
 pub mod preview;
 pub mod properties;
