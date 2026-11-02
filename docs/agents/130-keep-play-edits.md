@@ -75,8 +75,23 @@ cargo test -p metallic_studio -j 4 --test play_review -- --ignored the_diff_at_s
 
 ## Next
 
-Final checks and results are in the report to the conductor. PR #501 touches `play/local.rs` and `properties.rs`; rebase if
-it lands. #229 adds a `ChangeGroup` to `PlayReview::groups`; the list already draws several.
+PR #501 touches `play/local.rs` and `properties.rs`; rebase if it lands. #229 adds a `ChangeGroup` to
+`PlayReview::groups`; the list already draws several.
+
+## Last check results (base `20d79fa`)
+
+- `cargo test --workspace` and `cargo clippy --workspace --all-targets` cannot compile on this base, with or without this
+  branch: `crates/metallic_script/tests/enums.rs:269` uses `common::TEST_RESUME_BUDGET`, which is not in `tests/common`
+  (#510 merged next to #513). Not fixed here. Everything else was run with that one target left out.
+- Tests: 2154 passed, 1 failed, 9 ignored (workspace without `metallic_script`); 327 passed, 0 failed, 3 ignored
+  (`metallic_script` without `enums`). The failure is `metallic_render --test shading
+  gpu_timing_measures_a_frame_where_supported` (#436), which failed again alone.
+- Clippy with the same target left out, `cargo fmt --check` and `cargo deny check licenses`: clean.
+
+## Noticed, not fixed
+
+- 3,214 unanchored Parts created at the same spot by a script took the test process past 9 GB and did not finish one
+  update (found while making `list-capped.png`; killed, not investigated). The picture now anchors them.
 
 ## Open questions
 
