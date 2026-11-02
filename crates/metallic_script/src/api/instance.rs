@@ -16,8 +16,8 @@ use metallic_core::classes::{
 use metallic_core::transform;
 use metallic_core::{CoreError, InstanceId, Value as CoreValue};
 use mlua::{
-    AnyUserData, BorrowedStr, FromLua, Function, Lua, MetaMethod, MultiValue, Table, Thread, UserData,
-    UserDataFields, UserDataMethods, UserDataRef, Value,
+    AnyUserData, BorrowedStr, FromLua, Function, Lua, MetaMethod, MultiValue, Table, Thread,
+    UserData, UserDataFields, UserDataMethods, UserDataRef, Value,
 };
 
 use super::cframe::{LuaCFrame, cframe};
@@ -350,6 +350,8 @@ impl FromLua for TextArgument {
     }
 }
 
+#[cfg(test)]
+mod lookup_tests;
 #[cfg(test)]
 mod read_probe;
 

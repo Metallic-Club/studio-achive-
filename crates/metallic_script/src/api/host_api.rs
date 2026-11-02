@@ -121,7 +121,6 @@ impl Binding {
     }
 
     /// The callback set on `id`, if any. #466 is the first to call one.
-    #[cfg(test)]
     pub(crate) fn callback(&self, id: InstanceId, decl: DeclId) -> Option<Function> {
         self.callbacks.borrow().get(&(id, decl)).cloned()
     }

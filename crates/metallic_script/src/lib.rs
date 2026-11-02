@@ -29,6 +29,8 @@ mod pattern;
 mod task_lib;
 mod vm;
 
+#[doc(hidden)]
+pub use api::FixtureApi;
 pub use api::host_methods::{
     HostCall, HostMethodFn, HostState, NOT_MIGRATED_HOST_METHODS, host_methods,
 };

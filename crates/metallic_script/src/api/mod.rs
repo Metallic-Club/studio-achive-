@@ -29,8 +29,11 @@ use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
+use metallic_core::classes::{DeclId, HostMethods, Registry};
 use metallic_core::{InstanceId, World};
 use mlua::{Error, Function, Table, WeakLua};
+
+use host_methods::HostState;
 
 use crate::vm::{Budget, Context, OutputSink, ScriptError, ScriptVm, format_error};
 
@@ -154,16 +157,50 @@ pub(crate) fn install(
         .map_err(setup_failed)
 }
 
-/// [`install`] with other classes: a test binds a fixture registry.
-#[cfg(test)]
-pub(crate) fn install_with(
-    vm: &ScriptVm,
-    world: Rc<RefCell<World>>,
-    shared: Rc<HostShared>,
-    sink: Rc<dyn OutputSink>,
-    classes: host_api::ClassSource,
-) -> Result<Rc<ApiState>, ScriptError> {
-    build(vm, world, shared, sink, classes).map_err(setup_failed)
+/// The whole API installed over other classes than the built-in ones, so a test shows the binding
+/// names no class: a method added to a fixture registry is callable with no binding change. The
+/// fixture's classes must have the names of real classes, since the world only creates those.
+#[doc(hidden)]
+pub struct FixtureApi(Rc<ApiState>);
+
+impl FixtureApi {
+    /// Installs the API into `vm` over `registry` and `methods`.
+    pub fn install(
+        vm: &ScriptVm,
+        world: Rc<RefCell<World>>,
+        sink: Rc<dyn OutputSink>,
+        registry: &'static Registry,
+        methods: &'static HostMethods<HostState>,
+    ) -> Result<FixtureApi, ScriptError> {
+        let classes = host_api::ClassSource { registry, methods };
+        build(vm, world, Rc::new(HostShared::default()), sink, classes)
+            .map(FixtureApi)
+            .map_err(setup_failed)
+    }
+
+    /// The Luau object of `id`.
+    pub fn wrap(&self, id: InstanceId) -> mlua::Result<mlua::AnyUserData> {
+        let Some(lua) = self.0.lua.try_upgrade() else {
+            return Err(Error::runtime("the VM is gone"));
+        };
+        self.0.wrap(&lua, id)
+    }
+
+    /// Advances the clock parked threads see and resumes the waits that are over.
+    pub fn wake_waiters(&self, now: f64) {
+        self.0.now.set(now);
+        self.0.wake_waiters();
+    }
+
+    /// The callback set on `id` for the declaration `decl`.
+    pub fn callback(&self, id: InstanceId, decl: DeclId) -> Option<Function> {
+        self.0.binding.callback(id, decl)
+    }
+
+    /// Forgets what belonged to destroyed instances, as a step does.
+    pub fn prune(&self) {
+        self.0.prune_hub();
+    }
 }
 
 fn build(
