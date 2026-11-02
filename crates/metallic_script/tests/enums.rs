@@ -266,7 +266,7 @@ fn a_save_after_an_item_write_stores_the_name_and_loads_back_as_the_item() {
     let world = std::rc::Rc::new(std::cell::RefCell::new(loaded));
     let out = std::rc::Rc::new(common::Capture::default());
     let mut host = metallic_script::ScriptHost::new(world.clone(), out.clone());
-    host.set_resume_budget(common::TEST_RESUME_BUDGET);
+    host.set_resume_budget(metallic_script::TEST_RESUME_BUDGET);
     let mut rig = Rig { world, host, out };
     rig.server_script(
         "S",
