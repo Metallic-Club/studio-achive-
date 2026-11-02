@@ -566,9 +566,10 @@ fn set_member(
             let result = match value {
                 Value::Nil => host.set_callback(this.id, class.id, id, None),
                 Value::Function(f) => {
+                    let mark = functions.mark();
                     let reference = functions.add(f.clone());
                     let result = host.set_callback(this.id, class.id, id, Some(reference));
-                    functions.release(reference);
+                    functions.release_since(mark);
                     result
                 }
                 other => {

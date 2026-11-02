@@ -388,55 +388,26 @@ fn lookup_finds_members_before_children_of_any_kind() {
 
 #[test]
 fn a_method_closure_is_cached_per_declaration_and_per_vm() {
-    let source = "return function(a, b) return a.Greet, b.Greet, a.PartOnly end";
+    // Both VMs stay alive to the end, so no address can be reused between them.
+    let fixtures = [Fixture::server(), Fixture::server()];
     let mut pointers = Vec::new();
-    for _ in 0..2 {
-        let fixture = Fixture::server();
-        let (part, model, folder) = {
-            let mut world = fixture.world.borrow_mut();
-            (
-                world.create("Part", None).unwrap(),
-                world.create("Model", None).unwrap(),
-                world.create("Folder", None).unwrap(),
-            )
+    for fixture in &fixtures {
+        let wrap = |class| {
+            let id = fixture.world.borrow_mut().create(class, None).unwrap();
+            fixture.api.wrap(id).unwrap()
         };
-        let read = fixture.function(source);
-        let (part, model, folder) = (
-            fixture.api.wrap(part).unwrap(),
-            fixture.api.wrap(model).unwrap(),
-            fixture.api.wrap(folder).unwrap(),
-        );
-        let call = |a: &mlua::AnyUserData, b: &mlua::AnyUserData| {
-            let (first, second, third): (mlua::Function, mlua::Function, mlua::Value) = fixture
-                .vm
-                .call_with_budget(&read, (a.clone(), b.clone()))
-                .map_err(|e| e.message)
-                .or_else(|_| {
-                    // `a.PartOnly` does not exist on a Model; ask for what does.
-                    Err::<_, String>("wrong receiver".to_string())
-                })
-                .unwrap();
-            (first.to_pointer(), second.to_pointer(), third.to_pointer())
+        let (part, model, folder) = (wrap("Part"), wrap("Model"), wrap("Folder"));
+        let read = fixture.function("return function(object) return object.Greet end");
+        let pointer = |object: &mlua::AnyUserData| {
+            let function: mlua::Function = read.call(object.clone()).unwrap();
+            function.to_pointer()
         };
-        let (a, b, only) = call(&part, &part);
         // The same declaration on two classes, and asked for again.
-        let same = fixture
-            .function("return function(a, b) return a.Greet == b.Greet end")
-            .call::<bool>((part.clone(), model.clone()))
-            .unwrap();
-        assert!(same);
-        assert_eq!(a, b);
+        assert_eq!(pointer(&part), pointer(&part));
+        assert_eq!(pointer(&part), pointer(&model));
         // An override is its own declaration.
-        let other = fixture
-            .function("return function(a, b) return a.Greet == b.Greet end")
-            .call::<bool>((part.clone(), folder.clone()))
-            .unwrap();
-        assert!(!other);
-        let (again, _, only_again) = call(&part, &part);
-        assert_eq!((a, only), (again, only_again));
-        pointers.push(a);
-        // Keep the VM alive past the comparison above, so no address is reused.
-        std::mem::forget(fixture);
+        assert_ne!(pointer(&part), pointer(&folder));
+        pointers.push(pointer(&part));
     }
     assert_ne!(pointers[0], pointers[1], "each VM has its own function");
 }
@@ -588,13 +559,13 @@ fn the_function_references_of_a_call_end_with_it() {
         for _ = 1, 3 do
             assert(part:Echo(f) == f)
             assert(pcall(function() return part:Echo(f, Vector2.new()) end) == false)
+            assert(pcall(function() return part:Echo({ f, Vector2.new() }) end) == false)
         end
         print("ok")
         "#,
     );
     assert_eq!(lines, ["ok"]);
-    // Reaching a VM's shutdown with a clean table is what `ScriptFunctions::release` is for; a
-    // leak here would hold every function ever passed.
+    assert_eq!(fixture.api.functions_in_use(), 0);
 }
 
 #[test]

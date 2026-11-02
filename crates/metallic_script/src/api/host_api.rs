@@ -19,7 +19,7 @@ use mlua::{Function, IntoLuaMulti, Lua, MultiValue, Table, UserDataRef, Value};
 
 use super::host_methods::{self, HostState};
 use super::instance::{LuaInstance, Waiter};
-use super::script_value::{lua_to_script, release_functions};
+use super::script_value::lua_to_script;
 use super::{ApiState, errors, lua_error};
 use crate::vm::Context;
 
@@ -484,6 +484,7 @@ fn rust_body<R: IntoLuaMulti>(
         let state = &this.state;
         let mut args = state.binding.args.take();
         args.clear();
+        let references = state.functions.mark();
         let mut dead_argument = None;
         let values = inline.iter().take(count).chain(rest.iter());
         let converted = values.into_iter().try_for_each(|value| {
@@ -505,9 +506,7 @@ fn rust_body<R: IntoLuaMulti>(
                 Err(error) => Err(this.host_error(error, dead_argument.take())),
             }
         });
-        for argument in &args {
-            release_functions(state, argument);
-        }
+        state.functions.release_since(references);
         args.clear();
         state.binding.args.replace(args);
         result

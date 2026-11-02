@@ -197,6 +197,11 @@ impl FixtureApi {
         self.0.binding.callback(id, decl)
     }
 
+    /// How many function references are open: none outside a call.
+    pub fn functions_in_use(&self) -> usize {
+        self.0.functions.mark()
+    }
+
     /// Forgets what belonged to destroyed instances, as a step does.
     pub fn prune(&self) {
         self.0.prune_hub();

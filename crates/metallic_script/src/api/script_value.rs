@@ -2,8 +2,7 @@
 //!
 //! Script functions cross as a [`FunctionRef`] into this VM's [`ScriptFunctions`].
 
-use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use metallic_core::classes::{EnumItemRef, FunctionRef, ScriptValue};
@@ -21,28 +20,34 @@ const MAX_TABLE_DEPTH: usize = 32;
 /// 2^63: the first number above the `Int` range, and the magnitude of its lowest value.
 const I64_BOUND: f64 = 9_223_372_036_854_775_808.0;
 
-/// The functions of this VM that a [`FunctionRef`] currently names.
+/// The functions of this VM that a [`FunctionRef`] currently names: those of the calls in progress,
+/// as a stack, so a nested call's references end before its caller's. A reference is good for the
+/// call it came with; what outlives that (a callback) keeps the function itself.
 #[derive(Default)]
 pub(crate) struct ScriptFunctions {
-    next: Cell<u64>,
-    live: RefCell<HashMap<u64, Function>>,
+    live: RefCell<Vec<Function>>,
 }
 
 impl ScriptFunctions {
-    /// A reference to `function`, valid until [`ScriptFunctions::release`].
     pub(crate) fn add(&self, function: Function) -> FunctionRef {
-        let id = self.next.get();
-        self.next.set(id + 1);
-        self.live.borrow_mut().insert(id, function);
-        FunctionRef(id)
+        let mut live = self.live.borrow_mut();
+        live.push(function);
+        FunctionRef(live.len() as u64 - 1)
     }
 
     pub(crate) fn get(&self, reference: FunctionRef) -> Option<Function> {
-        self.live.borrow().get(&reference.0).cloned()
+        let index = usize::try_from(reference.0).ok()?;
+        self.live.borrow().get(index).cloned()
     }
 
-    pub(crate) fn release(&self, reference: FunctionRef) {
-        self.live.borrow_mut().remove(&reference.0);
+    /// Where a call's references start.
+    pub(crate) fn mark(&self) -> usize {
+        self.live.borrow().len()
+    }
+
+    /// Ends the references made since `mark`, even by an argument that failed to convert halfway.
+    pub(crate) fn release_since(&self, mark: usize) {
+        self.live.borrow_mut().truncate(mark);
     }
 }
 
@@ -60,7 +65,7 @@ fn number(n: f64) -> ScriptValue {
 }
 
 /// A Luau value as a [`ScriptValue`]. A function gets a reference in `state`'s table; the caller
-/// gives it back with [`release_functions`].
+/// ends it with [`ScriptFunctions::release_since`].
 pub(crate) fn lua_to_script(state: &ApiState, value: &Value) -> mlua::Result<ScriptValue> {
     to_script(state, value, 0)
 }
@@ -144,25 +149,6 @@ fn table_to_script(state: &ApiState, table: &Table, depth: usize) -> mlua::Resul
         })
         .collect::<mlua::Result<Vec<_>>>()?;
     Ok(ScriptValue::Map(entries))
-}
-
-/// Ends the references [`lua_to_script`] made for `value`.
-pub(crate) fn release_functions(state: &ApiState, value: &ScriptValue) {
-    match value {
-        ScriptValue::Function(reference) => state.functions.release(*reference),
-        ScriptValue::Array(items) => {
-            for item in items {
-                release_functions(state, item);
-            }
-        }
-        ScriptValue::Map(entries) => {
-            for (key, item) in entries {
-                release_functions(state, key);
-                release_functions(state, item);
-            }
-        }
-        _ => {}
-    }
 }
 
 impl ApiState {
