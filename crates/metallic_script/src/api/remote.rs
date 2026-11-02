@@ -16,7 +16,6 @@ use super::datatypes::{
 };
 use super::enums::enum_item_ref;
 use super::instance::LuaInstance;
-use super::signals::EventKind;
 use super::{ApiState, lua_error};
 use crate::vm::Context;
 
@@ -183,11 +182,15 @@ impl ApiState {
 
     /// Delivers a queued remote to the handlers connected in this VM.
     pub(crate) fn deliver_remote(self: &Rc<Self>, message: &QueuedRemote) {
-        let (kind, sender) = match message.target {
-            RemoteTarget::Server { sender } => (EventKind::OnServerEvent, Some(sender)),
-            RemoteTarget::Client { .. } => (EventKind::OnClientEvent, None),
+        let (signal, sender) = match message.target {
+            RemoteTarget::Server { sender } => ("OnServerEvent", Some(sender)),
+            RemoteTarget::Client { .. } => ("OnClientEvent", None),
         };
-        self.fire((message.remote, kind), &|lua| {
+        // `FireServer` and friends checked the class when the message was queued.
+        let Some(key) = self.signal_key_of(message.remote, "RemoteEvent", signal) else {
+            return;
+        };
+        self.fire(key, &|lua| {
             let mut args = Vec::with_capacity(message.args.len() + 1);
             if let Some(sender) = sender {
                 args.push(self.wrap_opt(lua, Some(sender))?);

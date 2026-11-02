@@ -1,6 +1,25 @@
 //! GuiObject: a rectangle on the screen; the shared GUI properties live here.
 use crate::classes::prelude::*;
 
+const POINTER: &[Param] = &[Param::new("x", Ty::Number), Param::new("y", Ty::Number)];
+const INPUT: &[Param] = &[Param::new("input", Ty::Any)];
+
+static MOUSE_ENTER: SignalDesc = SignalDesc::new("MouseEnter")
+    .params(POINTER)
+    .describe("The pointer moved onto this, at this point on the screen.");
+static MOUSE_LEAVE: SignalDesc = SignalDesc::new("MouseLeave")
+    .params(POINTER)
+    .describe("The pointer left this, at this point on the screen.");
+static INPUT_BEGAN: SignalDesc = SignalDesc::new("InputBegan")
+    .params(INPUT)
+    .describe("A press began over this.");
+static INPUT_CHANGED: SignalDesc = SignalDesc::new("InputChanged")
+    .params(INPUT)
+    .describe("The pointer moved over this.");
+static INPUT_ENDED: SignalDesc = SignalDesc::new("InputEnded")
+    .params(INPUT)
+    .describe("A press that began over this ended.");
+
 pub static CLASS: ClassDesc = ClassDesc::new("GuiObject", Some("GuiBase2d"))
     .flags(ClassFlags::ABSTRACT)
     .category("GUI")
@@ -41,4 +60,11 @@ pub static CLASS: ClassDesc = ClassDesc::new("GuiObject", Some("GuiBase2d"))
         // Descendants are drawn and clicked only inside this element's rectangle.
         PropDesc::new("ClipsDescendants", ValueType::Bool, || Value::Bool(false))
             .describe("Draws and clicks what is inside it only within its own rectangle."),
+    ])
+    .signals(&[
+        &MOUSE_ENTER,
+        &MOUSE_LEAVE,
+        &INPUT_BEGAN,
+        &INPUT_CHANGED,
+        &INPUT_ENDED,
     ]);

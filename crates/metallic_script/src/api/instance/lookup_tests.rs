@@ -1,7 +1,6 @@
 //! What keeps lookup order unobservable while old tables and the registry both answer: names do
 //! not clash on any class, so asking one before the other cannot change a script's answer.
 
-use super::*;
 use crate::api::bridge::BRIDGED_METHODS;
 use crate::api::host_methods::NOT_MIGRATED_HOST_METHODS;
 use metallic_core::classes::registry;
@@ -36,7 +35,7 @@ fn a_method_is_listed_once() {
 }
 
 #[test]
-fn no_registry_member_of_a_class_shares_a_name_with_its_bridged_methods_or_events() {
+fn no_registry_member_of_a_class_shares_a_name_with_its_bridged_methods() {
     for class in registry().classes() {
         for member in &class.members {
             let name = member.name();
@@ -44,12 +43,20 @@ fn no_registry_member_of_a_class_shares_a_name_with_its_bridged_methods_or_event
                 .iter()
                 .any(|(owner, methods)| methods.contains(&name) && class.is_a_named(owner));
             assert!(!bridged, "{}.{name} is also bridged", class.name());
-            assert!(
-                event_kind(class.name(), name).is_none(),
-                "{}.{name} is also an event",
-                class.name()
-            );
         }
+    }
+}
+
+#[test]
+fn no_class_reaches_the_ids_of_the_host_object_signals() {
+    use crate::api::signals::{LAST_INPUT_TYPE_CHANGED, TAG_ADDED, TAG_REMOVED};
+    let lowest = [LAST_INPUT_TYPE_CHANGED, TAG_ADDED, TAG_REMOVED]
+        .iter()
+        .map(|id| usize::from(id.0))
+        .min()
+        .unwrap();
+    for class in registry().classes() {
+        assert!(class.members.len() < lowest, "{}", class.name());
     }
 }
 

@@ -24,7 +24,7 @@ use mlua::{
 use super::datatypes::{LuaUDim2, LuaVector2, LuaVector3, udim2};
 use super::enums::{Enums, enum_item};
 use super::errors;
-use super::signals::{EventKind, LuaSignal};
+use super::signals::{LAST_INPUT_TYPE_CHANGED, LuaSignal, plain_key};
 use super::{ApiState, lua_error};
 use crate::vm::Context;
 
@@ -346,7 +346,7 @@ impl ApiState {
             return;
         };
         for &name in changes {
-            self.fire((carrier, EventKind::LastInputTypeChanged), &|_| {
+            self.fire(plain_key(carrier, LAST_INPUT_TYPE_CHANGED), &|_| {
                 Ok(vec![self.enum_value("UserInputType", name)])
             });
         }
@@ -409,17 +409,22 @@ impl ApiState {
     }
 
     fn deliver_action_event(self: &Rc<Self>, event: &InputActionEvent) {
-        let kind = match event.kind {
-            InputEventKind::Pressed => EventKind::Pressed,
-            InputEventKind::Released => EventKind::Released,
-            InputEventKind::Triggered => EventKind::Triggered,
-            InputEventKind::StateChanged => EventKind::StateChanged,
+        let (signal, carries_value) = match event.kind {
+            InputEventKind::Pressed => ("Pressed", false),
+            InputEventKind::Released => ("Released", false),
+            InputEventKind::Triggered => ("Triggered", true),
+            InputEventKind::StateChanged => ("StateChanged", true),
         };
         let value = event.value;
-        self.fire((event.action, kind), &|lua| match kind {
-            EventKind::Triggered | EventKind::StateChanged => Ok(vec![value_to_lua(lua, value)?]),
-            _ => Ok(Vec::new()),
-        });
+        if let Some(key) = self.signal_key(event.action, signal) {
+            self.fire(key, &|lua| {
+                if carries_value {
+                    Ok(vec![value_to_lua(lua, value)?])
+                } else {
+                    Ok(Vec::new())
+                }
+            });
+        }
         // The bound handler of this action, if there is one.
         let state = match (event.kind, event.value) {
             (InputEventKind::Pressed, _) => "Begin",
@@ -1046,7 +1051,7 @@ impl UserData for LuaUis {
                             .ok_or_else(|| lua_error("the world has no RunService"))?;
                         Ok(Value::UserData(lua.create_userdata(LuaSignal {
                             state: this.state.clone(),
-                            key: (carrier, EventKind::LastInputTypeChanged),
+                            key: plain_key(carrier, LAST_INPUT_TYPE_CHANGED),
                         })?))
                     }
                     other => member(&this.methods, other, "UserInputService"),

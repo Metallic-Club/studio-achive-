@@ -2,8 +2,8 @@
 pub mod edit;
 
 use crate::CoreError;
-use crate::classes::{self, ClassFlags, ClassId, registry};
-use crate::signal::Signal;
+use crate::classes::{self, ClassFlags, ClassId, ScriptValue, SignalId, SignalKey, registry};
+use crate::signal::{Signal, SignalQueue};
 use crate::value::Value;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -25,10 +25,30 @@ static NULL_REFERENCE: Value = Value::Ref(None);
 
 /// A position in a world's change journal, shared by [`World::changes_since`] and
 /// [`World::changes_since_detailed`].
+///
+/// Cursors of one world are ordered (a later position is greater); cursors of different worlds
+/// are not comparable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChangeCursor {
     world: u64,
     revision: u64,
+}
+
+impl PartialOrd for ChangeCursor {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        (self.world == other.world).then(|| self.revision.cmp(&other.revision))
+    }
+}
+
+/// One property write that changed a value, as [`World::property_changes_since`] reports it.
+#[derive(Clone, Copy)]
+pub struct PropertyChange {
+    /// The instance whose property changed.
+    pub id: InstanceId,
+    /// The registry entry of the property.
+    pub prop: &'static classes::PropDef,
+    /// The journal position right after this change.
+    pub at: ChangeCursor,
 }
 
 /// What happened to a world since a [`ChangeCursor`] was taken.
@@ -181,6 +201,8 @@ pub struct World {
     /// Fires `(parent, child)` whenever an instance gets a parent (create or reparent).
     pub child_added: Signal<(InstanceId, InstanceId)>,
     prop_signals: HashMap<(InstanceId, Cow<'static, str>), Signal<Value>>,
+    /// Fires of declared signals waiting for the script host.
+    signals: SignalQueue,
     uid: u64,
     revision: u64,
     journal: VecDeque<JournalEntry>,
@@ -226,6 +248,7 @@ impl World {
             roots: Vec::new(),
             child_added: Signal::default(),
             prop_signals: HashMap::new(),
+            signals: SignalQueue::default(),
             uid: NEXT_WORLD_UID.fetch_add(1, Ordering::Relaxed),
             revision: 0,
             journal: VecDeque::new(),
@@ -319,6 +342,64 @@ impl World {
             })
             .collect();
         (DetailedChanges::Changes(changes), now)
+    }
+
+    /// Every `set` that changed a value since `cursor`, oldest first, one entry per write (`A -> B
+    /// -> A` is two). Same-value and rejected writes are not in it, nor are hierarchy changes.
+    /// `None` when the journal no longer reaches back to `cursor` or it came from another world.
+    /// Allocates nothing and walks only the entries after `cursor`: this is what `Changed` and
+    /// `GetPropertyChangedSignal` are fed from, so `World::set` pays nothing for them.
+    pub fn property_changes_since(
+        &self,
+        cursor: ChangeCursor,
+    ) -> Option<impl Iterator<Item = PropertyChange> + '_> {
+        let start = self.journal_start(cursor)?;
+        let world = self.uid;
+        Some(self.journal.range(start..).filter_map(move |entry| {
+            let Some(JournalKind::Property(prop)) = entry.kind else {
+                return None;
+            };
+            Some(PropertyChange {
+                id: entry.id,
+                prop,
+                at: ChangeCursor {
+                    world,
+                    revision: entry.revision,
+                },
+            })
+        }))
+    }
+
+    /// Queues `signal` of `id` for the script host's next step, with this payload. Delivery is
+    /// deferred, as for every signal. Costs one lookup, and queues nothing, when nobody listens or
+    /// `id` is gone. Check [`World::signal_is_watched`] first if the payload is costly to build.
+    pub fn fire(&mut self, id: InstanceId, signal: SignalId, args: Vec<ScriptValue>) {
+        self.fire_key(
+            SignalKey {
+                instance: id,
+                signal,
+                arg: 0,
+            },
+            args,
+        );
+    }
+
+    /// [`World::fire`] by the whole key, for one argument of a parameterized signal.
+    pub fn fire_key(&mut self, key: SignalKey, args: Vec<ScriptValue>) {
+        if self.signals.is_watched(&key) && self.is_alive(key.instance) {
+            self.signals.fire(key, args);
+        }
+    }
+
+    /// True when someone listens to `key`.
+    pub fn signal_is_watched(&self, key: &SignalKey) -> bool {
+        self.signals.is_watched(key)
+    }
+
+    /// The fires waiting for delivery and who listens. A script host publishes its subscribers
+    /// here and drains the fires once per step.
+    pub fn signals_mut(&mut self) -> &mut SignalQueue {
+        &mut self.signals
     }
 
     fn journal_start(&self, cursor: ChangeCursor) -> Option<usize> {
@@ -889,6 +970,7 @@ impl World {
             roots: self.roots.clone(),
             child_added: Signal::default(),
             prop_signals: HashMap::new(),
+            signals: SignalQueue::default(),
             uid: NEXT_WORLD_UID.fetch_add(1, Ordering::Relaxed),
             revision: 0,
             journal: VecDeque::new(),

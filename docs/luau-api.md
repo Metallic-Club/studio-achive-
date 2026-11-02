@@ -99,7 +99,7 @@ loading`, and every later `require` raises that. A client VM cannot require a Mo
 ## Instance
 - `Instance.new(class, parent?)`. Services and abstract classes (`BasePart`, `PVInstance`, ...) cannot be created; an unknown class errors.
 - Members: `Name`, `Parent`, `ClassName` (read-only), `FindFirstChild(name, recursive?)`, `WaitForChild(name, timeout?)`,
-  `GetChildren()`, `GetDescendants()`, `IsA(class)`, `Destroy()`, `Clone()`, and every registry property of the class by name.
+  `GetChildren()`, `GetDescendants()`, `IsA(class)`, `Destroy()`, `Clone()`, `Changed`, `GetPropertyChangedSignal(name)` (see "Property changes"), and every registry property of the class by name.
 - `instance.ChildName` finds a child. Unknown member: `<Name> is not a valid member of <ClassName>`.
 - Member keys must be strings; numeric keys are rejected. Invalid UTF-8 bytes in a string key keep the existing
   replacement-character behavior for lookup and errors.
@@ -310,9 +310,21 @@ local cf, size = door:GetBoundingBox()
 ## Signals
 `signal:Connect(fn)` returns a connection with `:Disconnect()` and `.Connected`. Handlers run in their own thread (they may
 `task.wait`). A `Connect` made inside a handler does not run in the same dispatch; `Disconnect` inside a handler is safe.
+Signals are declared in the class files and inherited, so a signal of `BasePart` is on every part.
+
+- `signal:Once(fn)` is a `Connect` that disconnects itself just before its first call (`.Connected` is already false
+  inside `fn`). It returns a normal `RBXScriptConnection`; `:Disconnect()` before the signal fires means `fn` never runs.
+- `signal:Wait()` yields the calling thread until the signal next fires and returns that fire's arguments (the same
+  values a `Connect` handler gets). Every thread waiting on a signal resumes on the same fire, after the handlers, each
+  under the normal 0.1 s resume budget. A `Wait()` started during a fire (for example inside a handler of the same
+  signal) resumes on the next fire. A wait ends without resuming when its script stops or is destroyed, or when the
+  signal's instance is destroyed. Outside a yieldable thread (inside a metamethod, for example) it fails with the same
+  error as `task.wait`. Both work on every signal.
 
 | Signal | Arguments | Fired when |
 |---|---|---|
+| `Instance.Changed` | `propertyName` | a property of the instance really changed (see "Property changes" below) |
+| `Instance:GetPropertyChangedSignal(name)` | none | that property really changed |
 | `BasePart.Touched` | `hit` | the runtime calls `ScriptHost::touched(part, hit)`; when a character touches the part, `hit` is the character part touching it: a body part (`Head`, `UpperTorso`, `LeftHand`, ...) whose touch volume follows the animated avatar, or the `HumanoidRootPart` for the movement capsule (either way `hit.Parent` is the character Model). Each character part fires its own `Touched`. Two characters' parts touch each other too: each fires `Touched` with the other's part, once per contact |
 | `BasePart.TouchEnded` | `hit` | the runtime calls `ScriptHost::touch_ended(part, hit)` when a character part stops touching the part (it separated, the character died, or the character was destroyed or replaced; two characters' touching parts end the same way), and when two ordinary parts that reported `Touched` stop touching (they separated, one was destroyed, or one changed `Size`, `Shape` or `CanCollide`), on both parts that still exist, once. If the other part was destroyed by then, `hit` is the destroyed instance. Pairs with `Touched` |
 | `Humanoid.Died` | none | the runtime calls `ScriptHost::humanoid_died` |
@@ -326,6 +338,40 @@ workspace.Lava.Touched:Connect(function(hit)
     local hum = hit.Parent:FindFirstChild("Humanoid")
     if hum then hum:TakeDamage(25) end
 end)
+local player = game:GetService("Players").PlayerAdded:Wait()
+local dt = game:GetService("RunService").Heartbeat:Wait()   -- wait one frame
+workspace.Door.Touched:Once(function(hit) print("first touch:", hit.Name) end)
+```
+
+### Property changes
+`inst:GetPropertyChangedSignal(name)` and `inst.Changed` are ordinary `RBXScriptSignal`s, for every property of every class.
+Code: `crates/metallic_script/src/api/property_signals.rs`; tests: `crates/metallic_script/tests/property_changed.rs`.
+
+- They fire for a real change only: a write of the value the property already has fires nothing; `A -> B -> A` is two
+  changes. Writes from scripts and from the engine (physics, the character controller, Studio) count alike.
+- Delivery is on the next `step`, after inputs and GUI events and before `Heartbeat`, oldest change first; for one change
+  `GetPropertyChangedSignal(name)` handlers run before `Changed` handlers. A write made inside a handler fires on the
+  following `step`, so handlers that keep changing what they watch cannot recurse. Handlers share the step budget like
+  every other handler (deferred when it runs out).
+- `Changed` passes the property name as a string. Engine bookkeeping properties (`Model.WorldPivotSet`,
+  `Model.ScaleFactor`) never fire it, and asking for them by name errors like an unknown name:
+  `Nope is not a valid property name.` Names are case-sensitive, like Roblox.
+- Covered: every registry property of the class. A `BasePart.CFrame` write fires `Position` and `Orientation`. Not yet (#437):
+  `Parent` and `CFrame` are not class properties until #464, so `GetPropertyChangedSignal("Parent")` and `("CFrame")` give the
+  unknown-name error, and `Changed` does not fire for `Parent`.
+- Changes made before a script connects or waits are not delivered to it. Destroying the instance drops its connections
+  (`Connected` becomes false); a new instance never fires old ones.
+- Each VM gets the changes of instances its own scripts listen to; both the server and the client VM see the shared world.
+  Listening costs nothing until a script connects, and a write costs nothing extra at any time: changes are read from the
+  world's change journal once per step, and only while something listens.
+- More than 16384 world changes between two steps while something listens drops that step's property events with a warning.
+
+```lua
+local hum = workspace.Npc.Humanoid
+hum:GetPropertyChangedSignal("Health"):Connect(function()
+    workspace.Npc.Bar.Size = Vector3.new(hum.Health / hum.MaxHealth * 4, 0.3, 0.3)
+end)
+workspace.Door.Changed:Connect(function(name) print("Door." .. name .. " changed") end)
 ```
 
 ## Services
