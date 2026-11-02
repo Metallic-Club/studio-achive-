@@ -65,9 +65,9 @@ struct Trampolines {
     sleep: Table,
 }
 
-/// Wraps a guarded Rust body. The argument count goes first, because a Rust function taking a fixed
-/// list of values cannot tell a nil argument from a missing one. `parking` also does what only Luau
-/// code can: yield its own thread when the body asked for that (design 5.4).
+/// Wraps a guarded Rust body. The argument count follows the instance, because a Rust function
+/// taking a fixed list of values cannot tell a nil argument from a missing one. `parking` also does
+/// what only Luau code can: yield its own thread when the body asked for that (design 5.4).
 const TRAMPOLINES: &str = r##"
 local select, yield, wait, park, sleep = ...
 local function after(first, ...)
