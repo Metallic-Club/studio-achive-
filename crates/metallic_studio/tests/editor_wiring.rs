@@ -1040,10 +1040,14 @@ fn box_drag(
     h.event(Event::ModifiersChanged(at_press));
     h.hover_at(from);
     h.run_steps(2);
+    let under = h.ctx.layer_id_at(from);
     button(h, from, true, at_press);
     h.hover_at(to);
     h.run_steps(2);
-    assert!(h.state().viewport.is_busy(), "the box drag started");
+    assert!(
+        h.state().viewport.is_busy(),
+        "the box drag started (the press at {from:?} was on {under:?})"
+    );
     h.event(Event::ModifiersChanged(at_release));
     h.run_steps(1);
     button(h, to, false, at_release);
@@ -1055,13 +1059,52 @@ fn box_drag(
 /// Select tool, and the camera close enough that the parts are well apart on screen. The
 /// viewport narrows when the first part is selected (Properties opens), so screen points must
 /// be read right before they are used.
+///
+/// The contextual toolbar is off. It shows once the pointer has rested for 200 ms of real time,
+/// so on a slow machine it appears mid-test, about 550 px wide above the selection, and takes
+/// any press that lands on it. `a_box_drag_works_with_the_contextual_toolbar_showing` covers the
+/// two together, with the toolbar shown on purpose.
 fn box_editor() -> (Harness<'static, EditorUi>, Scene) {
     let (mut ui, sc) = editor();
     ui.state.world.destroy(sc.base);
     ui.state.tool = Tool::Select;
+    ui.context_bar.enabled = false;
     ui.viewport.camera.position = DVec3::new(0.0, 6.0, 24.0);
     ui.viewport.camera.look_at(DVec3::ZERO);
     (harness(ui), sc)
+}
+
+#[test]
+fn a_box_drag_works_with_the_contextual_toolbar_showing() {
+    let (mut h, sc) = box_editor();
+    h.state_mut().context_bar.enabled = true;
+    h.state_mut().state.selection.set([sc.b]);
+    h.run_steps(2);
+    let revision = h.state().state.selection.revision();
+    h.state_mut().context_bar.arm(revision);
+    h.run_steps(2);
+    let bar = h.state().context_bar.last_rect.expect("the toolbar shows");
+
+    // From below A, so the press is clear of the toolbar, which sits above B.
+    let r = around_a(&h);
+    let (from, to) = (r.left_bottom(), r.right_top());
+    assert!(!bar.contains(from), "{from:?} is on the toolbar {bar:?}");
+    h.event(Event::ModifiersChanged(Modifiers::SHIFT));
+    h.hover_at(from);
+    h.run_steps(2);
+    button(&mut h, from, true, Modifiers::SHIFT);
+    h.hover_at(to);
+    h.run_steps(2);
+    assert!(h.state().viewport.is_busy(), "the box drag started");
+    assert_eq!(
+        h.state().context_bar.last_rect,
+        None,
+        "the toolbar stays out of the way of a box drag"
+    );
+    button(&mut h, to, false, Modifiers::SHIFT);
+    h.event(Event::ModifiersChanged(Modifiers::NONE));
+    h.run_steps(2);
+    assert_eq!(h.state().state.selection.ids(), &[sc.b, sc.a]);
 }
 
 const AT_A: DVec3 = DVec3::new(-8.0, 2.0, 0.0);
