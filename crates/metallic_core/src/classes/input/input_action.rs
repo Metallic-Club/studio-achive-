@@ -42,6 +42,21 @@ const TOUCH_SLOT: EnumDesc = EnumDesc::new("TouchSlot", &["Auto", "Stick", "Look
 /// How an action's touch control is placed.
 const TOUCH_LAYOUT: EnumDesc = EnumDesc::new("TouchLayout", &["Auto", "Custom"]);
 
+static PRESSED: SignalDesc = SignalDesc::new("Pressed")
+    .context(MemberContext::Client)
+    .describe("The action's control went down.");
+static RELEASED: SignalDesc = SignalDesc::new("Released")
+    .context(MemberContext::Client)
+    .describe("The action's control came up.");
+static TRIGGERED: SignalDesc = SignalDesc::new("Triggered")
+    .params(&[Param::new("value", Ty::Any)])
+    .context(MemberContext::Client)
+    .describe("The action's trigger was met: a press, a tap, a hold, as the action says.");
+static STATE_CHANGED: SignalDesc = SignalDesc::new("StateChanged")
+    .params(&[Param::new("value", Ty::Any)])
+    .context(MemberContext::Client)
+    .describe("The action's value changed.");
+
 pub static CLASS: ClassDesc = ClassDesc::new("InputAction", Some("Instance"))
     .flags(ClassFlags::CREATABLE)
     .category("Input")
@@ -110,4 +125,5 @@ pub static CLASS: ClassDesc = ClassDesc::new("InputAction", Some("Instance"))
         .describe("Where a Custom touch control sits on the screen."),
         PropDesc::new("TouchSize", ValueType::Number, || Value::Number(0.0))
             .describe("How big a Custom touch control is."),
-    ]);
+    ])
+    .signals(&[&PRESSED, &RELEASED, &TRIGGERED, &STATE_CHANGED]);

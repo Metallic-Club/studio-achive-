@@ -12,7 +12,6 @@ use mlua::{Lua, Table, Value};
 
 use super::ApiState;
 use super::datatypes::LuaVector3;
-use super::signals::EventKind;
 
 /// Most GUI events kept for one step; later ones are dropped until the next step.
 pub const MAX_GUI_EVENTS_PER_STEP: usize = 256;
@@ -41,30 +40,19 @@ pub enum GuiEventKind {
 }
 
 impl GuiEventKind {
-    /// The event named `name` of an instance of `class`, if it has it.
-    pub(crate) fn of(class: &str, name: &str) -> Option<GuiEventKind> {
-        use metallic_core::classes::is_subclass;
-        let kind = match name {
-            "MouseEnter" => GuiEventKind::MouseEnter,
-            "MouseLeave" => GuiEventKind::MouseLeave,
-            "InputBegan" => GuiEventKind::InputBegan,
-            "InputChanged" => GuiEventKind::InputChanged,
-            "InputEnded" => GuiEventKind::InputEnded,
-            "MouseButton1Down" => GuiEventKind::MouseButton1Down,
-            "MouseButton1Up" => GuiEventKind::MouseButton1Up,
-            "MouseButton1Click" => GuiEventKind::MouseButton1Click,
-            "Activated" => GuiEventKind::Activated,
-            _ => return None,
-        };
-        let button_only = matches!(
-            kind,
-            GuiEventKind::MouseButton1Down
-                | GuiEventKind::MouseButton1Up
-                | GuiEventKind::MouseButton1Click
-                | GuiEventKind::Activated
-        );
-        let base = if button_only { "GuiButton" } else { "Frame" };
-        is_subclass(class, base).then_some(kind)
+    /// The signal this fires. The class files say which classes have it.
+    fn signal(self) -> &'static str {
+        match self {
+            GuiEventKind::MouseEnter => "MouseEnter",
+            GuiEventKind::MouseLeave => "MouseLeave",
+            GuiEventKind::MouseButton1Down => "MouseButton1Down",
+            GuiEventKind::MouseButton1Up => "MouseButton1Up",
+            GuiEventKind::MouseButton1Click => "MouseButton1Click",
+            GuiEventKind::Activated => "Activated",
+            GuiEventKind::InputBegan => "InputBegan",
+            GuiEventKind::InputChanged => "InputChanged",
+            GuiEventKind::InputEnded => "InputEnded",
+        }
     }
 }
 
@@ -93,11 +81,10 @@ pub struct GuiEvent {
 impl ApiState {
     /// Fires `event` on its target, if the target still exists.
     pub(crate) fn deliver_gui_event(self: &Rc<Self>, event: &GuiEvent) {
-        let alive = self.world().is_ok_and(|w| w.is_alive(event.target));
-        if !alive {
+        // Nothing for a destroyed target, or one whose class has no such event.
+        let Some(key) = self.signal_key(event.target, event.kind.signal()) else {
             return;
-        }
-        let key = (event.target, EventKind::Gui(event.kind));
+        };
         let [x, y] = event
             .position
             .map(|v| if v.is_finite() { v.round() } else { 0.0 });

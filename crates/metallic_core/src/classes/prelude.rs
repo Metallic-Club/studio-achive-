@@ -1,5 +1,5 @@
 //! What a class file imports.
-// No class file has a Native method until #465.
+// Only some class files have Native methods until #465.
 #[allow(unused_imports)]
 pub use super::call::*;
 pub use super::desc::*;

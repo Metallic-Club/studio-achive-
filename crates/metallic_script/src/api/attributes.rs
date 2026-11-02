@@ -7,14 +7,15 @@
 //! the next step after the change, whoever made it (this VM, the other VM or the editor), like
 //! the other signals.
 //!
-//! A signal's key holds an interned name id (`EventKind::AttributeChanged(id)`): 0 is the
-//! instance-wide `AttributeChanged(name)` event, any other id is
+//! `AttributeChanged` is declared on `Instance`. `SignalKey::arg` holds an interned name id: 0 is
+//! the instance-wide `AttributeChanged(name)` event, any other id is
 //! `GetAttributeChangedSignal(name)`, which fires without arguments.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use metallic_core::classes::SignalKey;
 use metallic_core::{
     AttributeChanges, AttributeCursor, CoreError, Value as CoreValue, check_attribute_name,
 };
@@ -23,7 +24,7 @@ use mlua::{Function, Lua, Table, UserDataRef, Value};
 use super::cframe::cframe;
 use super::datatypes::{color, udim2, vector};
 use super::instance::LuaInstance;
-use super::signals::{EventKind, LuaSignal};
+use super::signals::{LuaSignal, plain_key};
 use super::{ApiState, errors, lua_error};
 
 /// Changes read from the world's log at a time.
@@ -137,7 +138,10 @@ pub(crate) fn methods(lua: &Lua) -> mlua::Result<Vec<(&'static str, Function)>> 
         let id = this.state.attribute_name_id(&name)?;
         lua.create_userdata(LuaSignal {
             state: this.state.clone(),
-            key: (this.id, EventKind::AttributeChanged(id)),
+            key: SignalKey {
+                arg: id,
+                ..plain_key(this.id, this.state.instance_signals.attribute_changed)
+            },
         })
     })?;
     Ok(vec![
@@ -201,8 +205,8 @@ impl ApiState {
             let mut handled = 0;
             for change in &page {
                 let named = self.attributes.names.borrow().get(&change.name).copied();
-                let any = (change.id, EventKind::AttributeChanged(0));
-                let specific = named.map(|id| (change.id, EventKind::AttributeChanged(id)));
+                let any = plain_key(change.id, self.instance_signals.attribute_changed);
+                let specific = named.map(|arg| SignalKey { arg, ..any });
                 let handlers =
                     self.handler_count(any) + specific.map_or(0, |k| self.handler_count(k));
                 if !self.lifecycle_room(handlers) {

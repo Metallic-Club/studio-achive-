@@ -407,6 +407,16 @@ impl Budget {
         self.sched.current_owner()
     }
 
+    /// Gives a parking thread ownership state, so cancelling its owner blocks it.
+    pub(crate) fn adopt(&self, thread: &Thread) -> mlua::Result<()> {
+        self.sched.adopt(thread)
+    }
+
+    /// Whether a parked thread may still be resumed (suspended and not cancelled).
+    pub(crate) fn can_resume_parked(&self, thread: &Thread) -> bool {
+        self.sched.can_resume_parked(thread)
+    }
+
     /// Cancels the sleeping threads of a script.
     pub(crate) fn cancel_owner(&self, owner: u64) {
         self.sched.cancel_owner(owner);

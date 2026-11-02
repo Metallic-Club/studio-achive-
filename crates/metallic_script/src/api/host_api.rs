@@ -12,7 +12,8 @@ use std::rc::Rc;
 use metallic_core::classes::{
     ApiError, ApiErrorKind, CallContext, CallOutcome, ClassId, DeclId, FunctionRef, Handle,
     HostApi, HostMethods, MemberId, MemberKind, MethodDesc, MethodDispatch, MethodImpl, Registry,
-    ResolvedClass, ScriptValue, Side, Ty, UNNAMED_INSTANCE, WaitRequest, instance_class, member_of,
+    ResolvedClass, ScriptValue, Side, SignalKey, Ty, UNNAMED_INSTANCE, WaitRequest, instance_class,
+    member_of,
 };
 use metallic_core::{ConnectionId, InstanceId, World};
 use mlua::{Function, IntoLuaMulti, Lua, MultiValue, Table, UserDataRef, Value};
@@ -156,6 +157,24 @@ impl ApiState {
         LuauHost { state: self }
     }
 
+    /// True when `key` names a signal of its instance's class, or its instance is gone: a wait on a
+    /// destroyed instance parks, never resumes and is dropped with the next prune.
+    fn names_a_signal(&self, key: SignalKey) -> bool {
+        let Ok(world) = self.world.try_borrow() else {
+            return false;
+        };
+        let Some(class) = instance_class(self.binding.classes.registry, &world, key.instance)
+        else {
+            return true;
+        };
+        class
+            .members
+            .get(usize::from(key.signal.0))
+            .is_some_and(|member| {
+                matches!(member.kind, MemberKind::Signal { .. }) && !member.hidden
+            })
+    }
+
     fn call_context(&self) -> CallContext {
         let owner = self.budget.current_owner();
         CallContext {
@@ -180,6 +199,37 @@ impl LuauHost<'_> {
     pub(crate) fn own_class(&self, h: Handle) -> Result<&'static ResolvedClass, ApiError> {
         let world = self.state.world.try_borrow().map_err(|_| busy())?;
         instance_class(self.registry(), &world, h).ok_or_else(destroyed)
+    }
+
+    /// The key of a signal a binding addressed, with every rule checked: live handle, the member in
+    /// the instance's own class, that it is a signal, its context, and `arg` only where declared.
+    pub(crate) fn signal(
+        &self,
+        h: Handle,
+        class: ClassId,
+        m: MemberId,
+        arg: u32,
+    ) -> Result<SignalKey, ApiError> {
+        let world = self.state.world.try_borrow().map_err(|_| busy())?;
+        let (own, member) = member_of(self.registry(), &world, h, class, m)?;
+        let MemberKind::Signal { desc, .. } = member.kind else {
+            return Err(ApiError::new(
+                own.name(),
+                member.name(),
+                ApiErrorKind::NotAMember,
+            ));
+        };
+        self.state
+            .check_signal_context(own.name(), desc.name, member.context)?;
+        if arg != 0 && !desc.parameterized {
+            let text = format!("{} takes no argument", desc.name);
+            return Err(ApiError::message(text).within(own.name(), desc.name));
+        }
+        Ok(SignalKey {
+            instance: h,
+            signal: m,
+            arg,
+        })
     }
 }
 
@@ -288,17 +338,26 @@ impl HostApi for LuauHost<'_> {
 
     fn connect_signal(
         &mut self,
-        _: Handle,
-        _: ClassId,
-        _: MemberId,
-        _: u32,
-        _: FunctionRef,
+        h: Handle,
+        class: ClassId,
+        m: MemberId,
+        arg: u32,
+        f: FunctionRef,
     ) -> Result<ConnectionId, ApiError> {
-        // Until then a `LuaSignal` connects to the hub itself.
-        Err(ApiError::message("signals arrive with #463"))
+        let key = self.signal(h, class, m, arg)?;
+        // What outlives the call keeps the function itself, as a callback does.
+        let Some(function) = self.state.functions.get(f) else {
+            return Err(ApiError::message("that function reference has ended"));
+        };
+        self.state
+            .connect_listener(key, function, false)
+            .map(|(id, _)| id)
+            .ok_or_else(|| ApiError::message("too many connections"))
     }
 
-    fn disconnect(&mut self, _: ConnectionId) {}
+    fn disconnect(&mut self, c: ConnectionId) {
+        self.state.hub.disconnect(c);
+    }
 
     fn set_callback(
         &mut self,
@@ -455,8 +514,16 @@ fn parked_results(
             rest.push_back(Value::Number(seconds));
             Ok((Value::Table(sleep.clone()), rest))
         }
-        // Nothing can resume these yet.
-        WaitRequest::Signal { .. } => Err(lua_error("waiting for a signal arrives with #463")),
+        WaitRequest::Signal { key } => {
+            if !state.names_a_signal(key) {
+                // Nothing can resume a key that names no signal. This text is pinned by
+                // `tests/generic_binding.rs`, the one place that reaches it (see the #463 note).
+                return Err(lua_error("waiting for a signal arrives with #463"));
+            }
+            state.wait_for_signal(key, lua.current_thread())?;
+            Ok((Value::Table(park.clone()), MultiValue::new()))
+        }
+        // Nothing can resume this yet.
         WaitRequest::Reply { .. } => Err(lua_error("waiting for a reply arrives with #466")),
     }
 }

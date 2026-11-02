@@ -635,6 +635,8 @@ pub enum Ty {
     Optional(&'static Ty),
     /// Several values (returns only).
     Tuple(&'static [Ty]),
+    /// A signal object, as `GetPropertyChangedSignal` returns (returns only).
+    Signal,
     /// Any value.
     Any,
 }
@@ -829,13 +831,17 @@ impl MethodDesc {
     }
 }
 
-/// One signal a class declares (#463 delivers them).
+/// One signal a class declares: inherited like any member, fired with
+/// [`World::fire`](crate::World::fire) or [`MethodCall::fire`](super::MethodCall::fire), connected
+/// through the host interface. See "How to add a signal" in `ARCHITECTURE.md`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SignalDesc {
     /// Signal name.
     pub name: &'static str,
     /// The payload.
     pub params: &'static [Param],
+    /// Type of further values after `params`, when the payload is open-ended.
+    pub variadic: Option<Ty>,
     /// Who may connect; `None` takes the class default.
     pub context: Option<MemberContext>,
     /// Keyed by an argument (`GetAttributeChangedSignal(name)`).
@@ -852,6 +858,7 @@ impl SignalDesc {
         SignalDesc {
             name,
             params: &[],
+            variadic: None,
             context: None,
             parameterized: false,
             deprecated: None,
@@ -862,6 +869,24 @@ impl SignalDesc {
     /// Declares the payload.
     pub const fn params(mut self, params: &'static [Param]) -> SignalDesc {
         self.params = params;
+        self
+    }
+
+    /// The payload goes on with any number of values of this type.
+    pub const fn variadic(mut self, ty: Ty) -> SignalDesc {
+        self.variadic = Some(ty);
+        self
+    }
+
+    /// Who may connect, instead of the class default.
+    pub const fn context(mut self, context: MemberContext) -> SignalDesc {
+        self.context = Some(context);
+        self
+    }
+
+    /// Also keyed by an argument, as `GetPropertyChangedSignal(name)` is to `Changed`.
+    pub const fn parameterized(mut self) -> SignalDesc {
+        self.parameterized = true;
         self
     }
 

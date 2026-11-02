@@ -25,33 +25,12 @@ use super::datatypes::lua_to_value;
 use super::enums::enum_write;
 use super::errors;
 use super::host_api::{LuauHost, method_function};
-use super::signals::{EventKind, LuaSignal};
+use super::signals::LuaSignal;
 use super::{ApiState, lua_error};
 use crate::vm::format_error;
 
 /// How long `WaitForChild` without a timeout waits before it warns (like Roblox).
 const INFINITE_YIELD_WARN_SEC: f64 = 5.0;
-
-/// The event named `name` on an instance of `class`, if there is one.
-fn event_kind(class: &str, name: &str) -> Option<EventKind> {
-    match name {
-        "AttributeChanged" => Some(EventKind::AttributeChanged(0)),
-        "Touched" if is_subclass(class, "BasePart") => Some(EventKind::Touched),
-        "TouchEnded" if is_subclass(class, "BasePart") => Some(EventKind::TouchEnded),
-        "Died" if class == "Humanoid" => Some(EventKind::Died),
-        "CharacterAdded" if class == "Player" => Some(EventKind::CharacterAdded),
-        "PlayerAdded" if class == "Players" => Some(EventKind::PlayerAdded),
-        "PlayerRemoving" if class == "Players" => Some(EventKind::PlayerRemoving),
-        "Heartbeat" if class == "RunService" => Some(EventKind::Heartbeat),
-        "OnServerEvent" if class == "RemoteEvent" => Some(EventKind::OnServerEvent),
-        "OnClientEvent" if class == "RemoteEvent" => Some(EventKind::OnClientEvent),
-        "Pressed" if class == "InputAction" => Some(EventKind::Pressed),
-        "Released" if class == "InputAction" => Some(EventKind::Released),
-        "Triggered" if class == "InputAction" => Some(EventKind::Triggered),
-        "StateChanged" if class == "InputAction" => Some(EventKind::StateChanged),
-        _ => super::gui::GuiEventKind::of(class, name).map(EventKind::Gui),
-    }
-}
 
 /// A thread parked in `WaitForChild`.
 pub(crate) struct Waiter {
@@ -436,11 +415,13 @@ fn index_member(lua: &Lua, this: &LuaInstance, key: &str) -> mlua::Result<Value>
                 let function = method_function(lua, state, desc, decl, member.owner, id)?;
                 return Ok(Value::Function(function));
             }
-            // Connects to the hub; #463 fires it and moves connecting behind `HostApi`.
-            MemberKind::Signal { decl, .. } => {
+            MemberKind::Signal { .. } => {
+                let key = host
+                    .signal(this.id, resolved.id, id, 0)
+                    .map_err(|e| this.host_error(e, None))?;
                 return Ok(Value::UserData(lua.create_userdata(LuaSignal {
                     state: state.clone(),
-                    key: (this.id, EventKind::Declared(decl.0)),
+                    key,
                 })?));
             }
             MemberKind::Callback { desc, .. } => {
@@ -451,22 +432,6 @@ fn index_member(lua: &Lua, this: &LuaInstance, key: &str) -> mlua::Result<Value>
     }
     if let Some(method) = state.bridge.method(resolved, key) {
         return Ok(Value::Function(method.clone()));
-    }
-    if let Some(kind) = event_kind(class, key) {
-        use crate::vm::Context;
-        match (kind, state.context) {
-            (EventKind::OnServerEvent, Context::Client) => {
-                return Err(lua_error("OnServerEvent can only be used from the server"));
-            }
-            (EventKind::OnClientEvent, Context::Server) => {
-                return Err(lua_error("OnClientEvent can only be used from the client"));
-            }
-            _ => {}
-        }
-        return Ok(Value::UserData(lua.create_userdata(LuaSignal {
-            state: state.clone(),
-            key: (this.id, kind),
-        })?));
     }
     let child = state.world()?.find_first_child(this.id, key);
     match child {
@@ -525,9 +490,7 @@ fn set_member(
         .and_then(|id| Some((id, class.members.get(usize::from(id.0))?)))
         .filter(|(_, member)| !member.hidden);
     let Some((id, member)) = member else {
-        return if this.state.bridge.function(key).is_some()
-            || event_kind(class.name(), key).is_some()
-        {
+        return if this.state.bridge.function(key).is_some() {
             Err(lua_error(format!("{key} is read-only")))
         } else {
             Err(not_a_member(key, class.name()))

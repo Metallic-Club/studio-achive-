@@ -180,22 +180,16 @@ fn a_method_is_one_function_per_vm() {
 const CLASS_LITERALS_LEFT: &[(&str, usize, &str)] = &[
     // The userdata's `__type`, what `typeof` and error texts call it: not a class check. Stays.
     ("Instance", 1, "stays"),
-    // `CFrame` read and write, `Size` clamp: #464. `Touched`, `TouchEnded`: #463.
-    ("BasePart", 5, "#463, #464"),
+    // `CFrame` read and write, `Size` clamp: #464.
+    ("BasePart", 3, "#464"),
     // `WorldPivot` read and write: #464.
     ("Model", 2, "#464"),
-    // `LocalPlayer`: #464. `PlayerAdded`, `PlayerRemoving`: #463.
-    ("Players", 3, "#463, #464"),
+    // `LocalPlayer`: #464.
+    ("Players", 1, "#464"),
     // `CurrentCamera` read and write: computed like the others (#464).
     ("Workspace", 2, "#464"),
     // `ViewportSize` read and write: computed like the others (#464).
     ("Camera", 2, "#464"),
-    // Events: #463.
-    ("Humanoid", 1, "#463"),
-    ("Player", 1, "#463"),
-    ("RunService", 1, "#463"),
-    ("RemoteEvent", 2, "#463"),
-    ("InputAction", 4, "#463"),
 ];
 
 /// Every string literal in Rust source, comments and char literals left out.

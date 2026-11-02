@@ -114,6 +114,7 @@ fn hash_ty(hash: &mut Sha256, ty: &Ty) {
         Ty::Optional(_) => 14,
         Ty::Tuple(_) => 15,
         Ty::Any => 16,
+        Ty::Signal => 17,
     };
     hash.update([tag]);
     match ty {
@@ -215,6 +216,10 @@ fn hash_member(hash: &mut Sha256, member: &Member, owner: &str, defaults: &[Valu
         }
         MemberKind::Signal { desc, .. } => {
             hash_params(hash, desc.params);
+            hash.update([u8::from(desc.variadic.is_some())]);
+            if let Some(variadic) = &desc.variadic {
+                hash_ty(hash, variadic);
+            }
             hash.update([u8::from(desc.parameterized)]);
             optional_field(hash, desc.deprecated);
         }

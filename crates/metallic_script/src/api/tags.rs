@@ -14,6 +14,7 @@ use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use metallic_core::classes::SignalKey;
 use metallic_core::{CoreError, TagChanges, TagCursor, check_tag};
 use mlua::{
     AnyUserData, Function, Lua, MetaMethod, Table, UserData, UserDataFields, UserDataMethods,
@@ -21,7 +22,7 @@ use mlua::{
 };
 
 use super::instance::LuaInstance;
-use super::signals::{EventKind, LuaSignal};
+use super::signals::{LuaSignal, TAG_ADDED, TAG_REMOVED, plain_key};
 use super::{ApiState, errors, lua_error};
 
 /// Changes read from the world's log at a time.
@@ -202,11 +203,7 @@ impl LuaCollectionService {
                     lua,
                     move |lua, (this, tag): (UserDataRef<LuaCollectionService>, String)| {
                         let id = this.state.tag_name_id(&tag)?;
-                        let kind = if added {
-                            EventKind::TagAdded(id)
-                        } else {
-                            EventKind::TagRemoved(id)
-                        };
+                        let signal = if added { TAG_ADDED } else { TAG_REMOVED };
                         let carrier = this
                             .state
                             .world()?
@@ -214,7 +211,10 @@ impl LuaCollectionService {
                             .ok_or_else(|| lua_error("the world has no RunService"))?;
                         lua.create_userdata(LuaSignal {
                             state: this.state.clone(),
-                            key: (carrier, kind),
+                            key: SignalKey {
+                                arg: id,
+                                ..plain_key(carrier, signal)
+                            },
                         })
                     },
                 )?,
@@ -316,12 +316,11 @@ impl ApiState {
             for change in &page {
                 let named = self.tags.names.borrow().get(&change.tag).copied();
                 if let Some(name) = named {
-                    let kind = if change.added {
-                        EventKind::TagAdded(name)
-                    } else {
-                        EventKind::TagRemoved(name)
+                    let signal = if change.added { TAG_ADDED } else { TAG_REMOVED };
+                    let key = SignalKey {
+                        arg: name,
+                        ..plain_key(carrier, signal)
                     };
-                    let key = (carrier, kind);
                     if !self.lifecycle_room(self.handler_count(key)) {
                         break;
                     }

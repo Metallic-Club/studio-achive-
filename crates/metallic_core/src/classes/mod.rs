@@ -41,8 +41,8 @@ mod resolve;
 
 pub use call::{
     ApiError, ApiErrorKind, CallContext, CallOutcome, EnumItemRef, FunctionRef, MemberCategory,
-    MethodCall, MethodFn, ScriptValue, Side, SignalKey, TypeName, UNNAMED_INSTANCE, WaitRequest,
-    check_arguments, conforms,
+    MethodCall, MethodFn, ScriptValue, Side, SignalId, SignalKey, TypeName, UNNAMED_INSTANCE,
+    WaitRequest, check_arguments, conforms, property_signal_arg,
 };
 pub use desc::{
     ArgCheck, CallbackDesc, ClassDesc, ClassFlags, DefaultOverride, Editor, EnumDesc, FunctionSig,

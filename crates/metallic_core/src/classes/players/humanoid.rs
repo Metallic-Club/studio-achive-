@@ -5,6 +5,8 @@
 //! stays.
 use crate::classes::prelude::*;
 
+static DIED: SignalDesc = SignalDesc::new("Died").describe("This character died.");
+
 pub static CLASS: ClassDesc = ClassDesc::new("Humanoid", Some("Instance"))
     .flags(ClassFlags::CREATABLE)
     .category("Players")
@@ -31,4 +33,5 @@ pub static CLASS: ClassDesc = ClassDesc::new("Humanoid", Some("Instance"))
             MAX_SLOPE_ANGLE,
         )
         .describe("The steepest slope the character can walk up, in degrees."),
-    ]);
+    ])
+    .signals(&[&DIED]);

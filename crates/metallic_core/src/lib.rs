@@ -37,11 +37,11 @@ pub use instance::edit;
 pub use instance::{
     AttributeChange, AttributeChanges, AttributeCursor, Change, ChangeCursor, ChangeKind, Changes,
     DetailedChanges, InstanceId, MAX_ATTRIBUTE_NAME, MAX_ATTRIBUTE_STRING, MAX_ATTRIBUTES,
-    MAX_EXTRAS_BYTES, MAX_TAG, MAX_TAGS, TagChange, TagChanges, TagCursor, World,
+    MAX_EXTRAS_BYTES, MAX_TAG, MAX_TAGS, PropertyChange, TagChange, TagChanges, TagCursor, World,
     check_attribute_name, check_attribute_value, check_tag,
 };
 pub use scene_file::{MAX_SCENE_DEPTH, load_scene, save_scene};
-pub use signal::{ConnectionId, Signal};
+pub use signal::{ConnectionId, MAX_QUEUED_SIGNALS, QueuedSignal, Signal, SignalQueue};
 pub use value::{Color3, UDim2, Value, ValueType, Vec3, orientation_to_quat, quat_to_orientation};
 
 /// Errors returned by the core crate.
