@@ -76,6 +76,22 @@ pub trait HostApi {
     fn new_instance(&mut self, class: ClassId, parent: Option<Handle>) -> Result<Handle, ApiError>;
 }
 
+/// The class of a live instance in `registry`. World nodes hold ids of the built-in registry, so
+/// that one needs no lookup; any other (a test's fixture) is matched by class name.
+#[inline]
+pub fn instance_class<'r>(
+    registry: &'r Registry,
+    world: &World,
+    h: Handle,
+) -> Option<&'r ResolvedClass> {
+    let id = world.class_id(h)?;
+    if std::ptr::eq(registry, super::registry()) {
+        registry.class(id)
+    } else {
+        registry.class_by_name(super::registry().class(id)?.name())
+    }
+}
+
 /// The member a binding addressed, looked up in the instance's own class: this is where `hide`
 /// and overrides apply. Gives the instance's class with it.
 ///
@@ -88,10 +104,7 @@ pub fn member_of<'r>(
     class: ClassId,
     m: MemberId,
 ) -> Result<(&'r ResolvedClass, &'r Member), ApiError> {
-    let own = world
-        .class_name(h)
-        .and_then(|name| registry.class_by_name(name));
-    let Some(own) = own else {
+    let Some(own) = instance_class(registry, world, h) else {
         let kind = ApiErrorKind::Destroyed {
             name: UNNAMED_INSTANCE.to_owned(),
         };

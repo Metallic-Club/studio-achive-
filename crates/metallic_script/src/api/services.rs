@@ -29,9 +29,15 @@ const SERVICES: &[&str] = &[
     "CollectionService",
 ];
 
-/// True when `class` is a service, which scripts cannot create.
-pub(crate) fn is_service(class: &str) -> bool {
+/// True when `class` is a name `GetService` knows (#466 reads this from the registry).
+fn is_service(class: &str) -> bool {
     SERVICES.contains(&class)
+}
+
+/// True for a service that is a host object rather than a registry class, which `Instance.new`
+/// cannot find in the registry. Goes away when #466 and #467 make them classes.
+pub(crate) fn is_host_object(state: &ApiState, name: &str) -> bool {
+    super::input::service(state, name).is_some() || super::tags::service(state, name).is_some()
 }
 
 /// The Luau `DataModel` (`game`).
@@ -64,8 +70,8 @@ impl UserData for LuaGame {
                 if name == "GetService" {
                     return Ok(this
                         .state
-                        .methods
-                        .get("GetService")
+                        .bridge
+                        .function("GetService")
                         .map_or(Value::Nil, |f| Value::Function(f.clone())));
                 }
                 this.service(lua, &name)
@@ -86,7 +92,7 @@ pub(crate) fn game(lua: &Lua, state: &Rc<ApiState>) -> mlua::Result<AnyUserData>
     })
 }
 
-/// The service and `Humanoid` methods, by name (see `CLASS_METHODS` in `instance.rs`).
+/// The service and `Humanoid` methods, by name (see `api/bridge.rs`).
 pub(crate) fn methods(lua: &Lua) -> mlua::Result<Vec<(&'static str, Function)>> {
     let get_players = lua.create_function(|lua, this: UserDataRef<LuaInstance>| {
         this.expect_class("Players", "GetPlayers")?;

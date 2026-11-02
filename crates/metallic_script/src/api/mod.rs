@@ -7,17 +7,20 @@
 //! collects what to call, releases the borrow and only then calls into Lua.
 
 mod attributes;
+mod bridge;
 mod camera;
 mod cframe;
 mod datatypes;
 mod errors;
 mod gui;
+mod host_api;
 pub(crate) mod host_methods;
 mod input;
 mod instance;
 mod pivot;
 mod remote;
 mod require;
+mod script_value;
 mod services;
 mod signals;
 mod tags;
@@ -91,8 +94,12 @@ pub(crate) struct ApiState {
     /// The VM clock, set by the host on every step.
     pub(crate) now: Rc<Cell<f64>>,
     pub(crate) waiters: Rc<RefCell<Vec<instance::Waiter>>>,
-    /// Instance methods by name (`FindFirstChild`, `GetPlayers`, ...).
-    methods: HashMap<&'static str, Function>,
+    /// The methods the registry does not declare yet (`FindFirstChild`, `GetPlayers`, ...).
+    pub(crate) bridge: bridge::Bridge,
+    /// The method cache, argument buffer and callbacks of the host interface.
+    pub(crate) binding: host_api::Binding,
+    /// The functions a `FunctionRef` names.
+    pub(crate) functions: script_value::ScriptFunctions,
     /// `Enum` and its items.
     enums: input::Enums,
     /// Actions bound with `ContextActionService:BindAction`, by name.
@@ -142,7 +149,21 @@ pub(crate) fn install(
     shared: Rc<HostShared>,
     sink: Rc<dyn OutputSink>,
 ) -> Result<Rc<ApiState>, ScriptError> {
-    build(vm, world, shared, sink).map_err(setup_failed)
+    host_api::ClassSource::builtin()
+        .and_then(|classes| build(vm, world, shared, sink, classes))
+        .map_err(setup_failed)
+}
+
+/// [`install`] with other classes: a test binds a fixture registry.
+#[cfg(test)]
+pub(crate) fn install_with(
+    vm: &ScriptVm,
+    world: Rc<RefCell<World>>,
+    shared: Rc<HostShared>,
+    sink: Rc<dyn OutputSink>,
+    classes: host_api::ClassSource,
+) -> Result<Rc<ApiState>, ScriptError> {
+    build(vm, world, shared, sink, classes).map_err(setup_failed)
 }
 
 fn build(
@@ -150,6 +171,7 @@ fn build(
     world: Rc<RefCell<World>>,
     shared: Rc<HostShared>,
     sink: Rc<dyn OutputSink>,
+    classes: host_api::ClassSource,
 ) -> mlua::Result<Rc<ApiState>> {
     let lua = vm.lua();
     errors::install(lua)?;
@@ -161,7 +183,6 @@ fn build(
 
     let now = Rc::new(Cell::new(0.0));
     let waiters = Rc::new(RefCell::new(Vec::new()));
-    let mut methods = HashMap::new();
     let mut raw = instance::methods(lua, &waiters, &now)?;
     raw.extend(services::methods(lua)?);
     raw.extend(remote::methods(lua)?);
@@ -170,6 +191,7 @@ fn build(
     raw.extend(attributes::methods(lua)?);
     raw.extend(tags::methods(lua)?);
     raw.extend(camera::methods(lua)?);
+    let mut bodies = Vec::with_capacity(raw.len());
     for (name, function) in raw {
         // `WaitForChild` is Luau code that calls guarded functions itself.
         let function = if name == "WaitForChild" {
@@ -177,8 +199,10 @@ fn build(
         } else {
             errors::guarded(lua, function)?
         };
-        methods.insert(name, function);
+        bodies.push((name, function));
     }
+    let bridge = bridge::Bridge::new(classes.registry, bodies)?;
+    let binding = host_api::Binding::new(lua, classes)?;
 
     let enums = input::Enums::install(lua)?;
     let bind_wrapper = input::bind_wrapper(lua, &enums)?;
@@ -199,7 +223,9 @@ fn build(
         spawn,
         now,
         waiters,
-        methods,
+        bridge,
+        binding,
+        functions: script_value::ScriptFunctions::default(),
         enums,
         bound: RefCell::new(HashMap::new()),
         cancels: RefCell::new(Vec::new()),

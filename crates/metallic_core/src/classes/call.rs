@@ -240,6 +240,16 @@ impl ScriptValue {
         })
     }
 
+    /// Like [`ScriptValue::to_value`], moving what it holds, so a string or `CFrame` that came
+    /// from a [`Value`] goes back with no allocation.
+    pub fn into_value(self, ty: ValueType) -> Option<Value> {
+        match (self, ty) {
+            (ScriptValue::String(s), ValueType::String) => Some(Value::String(s.into_string())),
+            (ScriptValue::CFrame(c), ValueType::CFrame) => Some(Value::CFrame(c)),
+            (other, ty) => other.to_value(ty),
+        }
+    }
+
     /// What this value is, for an error message.
     pub fn type_name(&self, world: &World) -> TypeName {
         match self {
@@ -280,7 +290,11 @@ impl From<&Value> for ScriptValue {
 
 impl From<Value> for ScriptValue {
     fn from(value: Value) -> ScriptValue {
-        ScriptValue::from(&value)
+        match value {
+            Value::String(s) => ScriptValue::String(s.into_boxed_str()),
+            Value::CFrame(c) => ScriptValue::CFrame(c),
+            other => ScriptValue::from(&other),
+        }
     }
 }
 

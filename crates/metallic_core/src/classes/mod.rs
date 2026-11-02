@@ -44,7 +44,7 @@ pub use desc::{
 };
 pub use host_api::{
     Handle, HostApi, HostCall, HostMethodError, HostMethodFn, HostMethods, MethodDispatch,
-    member_of,
+    instance_class, member_of,
 };
 pub use lists::{
     CAMERA_TYPES, INPUT_ACTION_TYPES, INPUT_ROLES, INPUT_TRIGGERS, LIGHTING_STYLES, MATERIALS,

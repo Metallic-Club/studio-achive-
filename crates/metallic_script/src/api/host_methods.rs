@@ -1,15 +1,27 @@
 //! The methods core declares `Host` and this crate implements: they fire remotes, park threads,
 //! call back into script code or read host state. Design: `docs/design/class-system.md` section 5.6.
 //!
-//! Nothing dispatches through this table yet: the Luau binding starts to with #462, and methods
-//! move here from the old tables with #465-#467. `tests/host_methods.rs` holds the completeness
-//! rule.
+//! The Luau binding dispatches through this table (`api/host_api.rs`). Methods move here from the
+//! old tables with #465-#467; until then `api/bridge.rs` runs them. `tests/host_methods.rs` holds
+//! the completeness rule.
+use std::rc::Rc;
+use std::sync::LazyLock;
+
 use metallic_core::classes::{self, HostMethodError, HostMethods};
 
-/// What only the script host has. Empty until #462 gives the binding a reason to fill it.
-pub struct HostState(());
+use super::ApiState;
+
+/// What only the script host has: the state of the VM the call runs in.
+pub struct HostState {
+    // Read by the first method body that moves here (#465-#467).
+    #[allow(dead_code)]
+    pub(crate) api: Rc<ApiState>,
+}
 
 /// One call of a method this crate implements.
+///
+/// `call.world` is the world, borrowed for the call: going through the state's `world()` instead
+/// answers "the world is busy".
 pub type HostCall<'a> = classes::HostCall<'a, HostState>;
 
 /// A method body this crate implements. A WASM binding will call the same functions.
@@ -28,3 +40,7 @@ pub fn host_methods() -> Result<HostMethods<HostState>, HostMethodError> {
     // #465-#467 add `methods.implement("RemoteEvent", "FireServer", fire_server)?;` here.
     Ok(HostMethods::new(classes::registry()))
 }
+
+/// [`host_methods`], built once per process: it walks every member of every class.
+pub(crate) static SHARED: LazyLock<Result<HostMethods<HostState>, HostMethodError>> =
+    LazyLock::new(host_methods);

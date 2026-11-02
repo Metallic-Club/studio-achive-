@@ -1,57 +1,33 @@
-//! The Luau `Instance`: a light userdata around an [`InstanceId`], member lookup (methods,
-//! events, registry properties, children), `Instance.new` and `WaitForChild`.
+//! The Luau `Instance`: a light userdata around an [`InstanceId`], member lookup through the class
+//! registry and [`HostApi`], `Instance.new` and `WaitForChild`.
+//!
+//! Lookup order, for a name that is not one of the arms still waiting for #463 and #464: property,
+//! method, signal, callback, child by name. Names are unique across a class's members, so one
+//! table lookup covers the first four. See `api/host_api.rs` for the host side.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use metallic_core::classes::{class_def, find_property, is_subclass};
+use metallic_core::classes::{
+    ApiError, ApiErrorKind, HostApi, MemberKind, ResolvedClass, is_subclass,
+};
 use metallic_core::transform;
 use metallic_core::{CoreError, InstanceId, Value as CoreValue};
 use mlua::{
-    AnyUserData, Function, Lua, MetaMethod, Table, Thread, UserData, UserDataFields,
-    UserDataMethods, UserDataRef, Value,
+    AnyUserData, BorrowedStr, FromLua, Function, Lua, MetaMethod, Table, Thread, UserData,
+    UserDataFields, UserDataMethods, UserDataRef, Value,
 };
 
 use super::cframe::{LuaCFrame, cframe};
 use super::datatypes::lua_to_value;
 use super::errors;
+use super::host_api::{LuauHost, method_function};
 use super::signals::{EventKind, LuaSignal};
 use super::{ApiState, lua_error};
 use crate::vm::format_error;
 
 /// How long `WaitForChild` without a timeout waits before it warns (like Roblox).
 const INFINITE_YIELD_WARN_SEC: f64 = 5.0;
-
-/// Methods that exist only on some classes: `(method, class)`; a method listed more than once
-/// exists on each of those classes. Everything else in the method table is available on every
-/// instance.
-const CLASS_METHODS: &[(&str, &str)] = &[
-    ("GetService", "DataModel"),
-    ("GetPlayers", "Players"),
-    ("GetPlayerFromCharacter", "Players"),
-    ("IsServer", "RunService"),
-    ("IsClient", "RunService"),
-    ("TakeDamage", "Humanoid"),
-    ("FireServer", "RemoteEvent"),
-    ("FireClient", "RemoteEvent"),
-    ("FireAllClients", "RemoteEvent"),
-    ("ViewportPointToRay", "Camera"),
-    ("ScreenPointToRay", "Camera"),
-    ("WorldToViewportPoint", "Camera"),
-    ("WorldToScreenPoint", "Camera"),
-    ("GetState", "InputAction"),
-    ("GetHoldProgress", "InputAction"),
-    // PVInstance methods: BasePart and Model (PVInstance itself is not a registry class).
-    ("GetPivot", "BasePart"),
-    ("GetPivot", "Model"),
-    ("PivotTo", "BasePart"),
-    ("PivotTo", "Model"),
-    ("Resize", "BasePart"),
-    ("ScaleTo", "Model"),
-    ("GetScale", "Model"),
-    ("GetBoundingBox", "Model"),
-    ("GetExtentsSize", "Model"),
-];
 
 /// The event named `name` on an instance of `class`, if there is one.
 fn event_kind(class: &str, name: &str) -> Option<EventKind> {
@@ -82,6 +58,27 @@ pub(crate) struct Waiter {
     started: f64,
     deadline: Option<f64>,
     warned: bool,
+}
+
+impl Waiter {
+    /// `thread`, waiting from `started` for a child of `parent` named `name`, at most `timeout`
+    /// seconds when given.
+    pub(crate) fn new(
+        thread: Thread,
+        parent: InstanceId,
+        name: String,
+        started: f64,
+        timeout: Option<f64>,
+    ) -> Waiter {
+        Waiter {
+            thread,
+            parent,
+            name,
+            started,
+            deadline: timeout.map(|t| started + t.max(0.0)),
+            warned: false,
+        }
+    }
 }
 
 /// The Luau value of one instance. Cheap: an id plus the VM's shared state.
@@ -118,6 +115,22 @@ impl LuaInstance {
             .world()?
             .class_name(self.id)
             .ok_or_else(|| lua_error(format!("{} has been destroyed", self.name_hint.borrow())))
+    }
+
+    /// The Luau error of a host error. Core has no name for a destroyed instance, so this gives it
+    /// the receiver's last known name, or the name of the destroyed `argument` when that is what
+    /// the host refused.
+    pub(crate) fn host_error(&self, error: ApiError, argument: Option<String>) -> mlua::Error {
+        match error.kind {
+            ApiErrorKind::Destroyed { .. } => {
+                let name = match argument {
+                    Some(name) if self.live().is_ok() => name,
+                    _ => self.name_hint.borrow().clone(),
+                };
+                lua_error(format!("{name} has been destroyed"))
+            }
+            _ => lua_error(error),
+        }
     }
 
     /// Errors unless this instance is (a subclass of) `class`.
@@ -236,11 +249,6 @@ impl ApiState {
         // Waits registered while threads resumed are already in the list.
         self.waiters.borrow_mut().extend(still_waiting);
     }
-
-    fn get_property(self: &Rc<Self>, lua: &Lua, id: InstanceId, key: &str) -> mlua::Result<Value> {
-        let value = self.world()?.get(id, key).map_err(core_error)?;
-        self.value_to_lua(lua, value)
-    }
 }
 
 impl UserData for LuaInstance {
@@ -306,15 +314,51 @@ fn member_name(key: &Value) -> mlua::Result<MemberName> {
     }
 }
 
+/// A method's text argument, borrowed from Luau so a call allocates no string. Whatever is not
+/// valid text goes through `String`'s own conversion, for the same coercion and error.
+enum TextArgument {
+    Borrowed(BorrowedStr),
+    Owned(String),
+}
+
+impl AsRef<str> for TextArgument {
+    fn as_ref(&self) -> &str {
+        match self {
+            Self::Borrowed(value) => value.as_ref(),
+            Self::Owned(value) => value.as_str(),
+        }
+    }
+}
+
+impl FromLua for TextArgument {
+    fn from_lua(value: Value, lua: &Lua) -> mlua::Result<Self> {
+        let Value::String(text) = &value else {
+            return String::from_lua(value, lua).map(Self::Owned);
+        };
+        text.to_str().map(Self::Borrowed).map_err(|_| {
+            // The text of a `String` parameter, rather than of a borrowed one.
+            let bytes = text.as_bytes();
+            mlua::Error::FromLuaConversionError {
+                from: "string",
+                to: "String".into(),
+                message: std::str::from_utf8(&bytes).err().map(|e| e.to_string()),
+            }
+        })
+    }
+}
+
 #[cfg(test)]
 mod read_probe;
 
 fn index(lua: &Lua, this: &LuaInstance, key: Value) -> mlua::Result<Value> {
     let member = member_name(&key)?;
     let key = member.as_ref();
-    this.live()?;
     let state = &this.state;
-    let class = this.class()?;
+    let mut host = state.host();
+    let resolved = host
+        .own_class(this.id)
+        .map_err(|e| this.host_error(e, None))?;
+    let class = resolved.name();
     match key {
         "ClassName" => return Ok(Value::String(lua.create_string(class)?)),
         "Parent" => {
@@ -358,15 +402,37 @@ fn index(lua: &Lua, this: &LuaInstance, key: Value) -> mlua::Result<Value> {
         _ => {}
     }
     state.check_input_member(class, key)?;
-    if let Some(method) = state.methods.get(key) {
-        let mut owners = CLASS_METHODS
-            .iter()
-            .filter(|(name, _)| *name == key)
-            .peekable();
-        let allowed = owners.peek().is_none() || owners.any(|(_, owner)| is_subclass(class, owner));
-        if allowed {
-            return Ok(Value::Function(method.clone()));
+    let member = host
+        .resolve_member(resolved.id, key)
+        .and_then(|id| Some((id, resolved.members.get(usize::from(id.0))?)))
+        .filter(|(_, member)| !member.hidden);
+    if let Some((id, member)) = member {
+        match member.kind {
+            MemberKind::Property { .. } => {
+                let value = host
+                    .get_property(this.id, resolved.id, id)
+                    .map_err(|e| this.host_error(e, None))?;
+                return state.script_to_lua(lua, value);
+            }
+            MemberKind::Method { desc, decl } => {
+                let function = method_function(lua, state, desc, decl, member.owner, id)?;
+                return Ok(Value::Function(function));
+            }
+            // Connects to the hub; #463 fires it and moves connecting behind `HostApi`.
+            MemberKind::Signal { decl, .. } => {
+                return Ok(Value::UserData(lua.create_userdata(LuaSignal {
+                    state: state.clone(),
+                    key: (this.id, EventKind::Declared(decl.0)),
+                })?));
+            }
+            MemberKind::Callback { desc, .. } => {
+                let kind = ApiErrorKind::CallbackRead;
+                return Err(lua_error(ApiError::new(class, desc.name, kind)));
+            }
         }
+    }
+    if let Some(method) = state.bridge.method(resolved, key) {
+        return Ok(Value::Function(method.clone()));
     }
     if let Some(kind) = event_kind(class, key) {
         use crate::vm::Context;
@@ -384,9 +450,6 @@ fn index(lua: &Lua, this: &LuaInstance, key: Value) -> mlua::Result<Value> {
             key: (this.id, kind),
         })?));
     }
-    if find_property(class, key).is_some_and(|d| !d.hidden) {
-        return state.get_property(lua, this.id, key);
-    }
     let child = state.world()?.find_first_child(this.id, key);
     match child {
         Some(child) => Ok(Value::UserData(state.wrap(lua, child)?)),
@@ -397,8 +460,11 @@ fn index(lua: &Lua, this: &LuaInstance, key: Value) -> mlua::Result<Value> {
 fn new_index(this: &LuaInstance, key: Value, value: &Value) -> mlua::Result<()> {
     let member = member_name(&key)?;
     let key = member.as_ref();
-    this.live()?;
-    let class = this.class()?;
+    let mut host = this.state.host();
+    let resolved = host
+        .own_class(this.id)
+        .map_err(|e| this.host_error(e, None))?;
+    let class = resolved.name();
     match key {
         "ClassName" => Err(lua_error("ClassName is read-only")),
         "CurrentCamera" if class == "Workspace" => Err(lua_error("CurrentCamera is read-only")),
@@ -424,32 +490,72 @@ fn new_index(this: &LuaInstance, key: Value, value: &Value) -> mlua::Result<()> 
             transform::set_world_pivot(&mut *this.state.world_mut()?, this.id, cf)
                 .map_err(core_error)
         }
-        _ => {
-            let Some(def) = find_property(class, key).filter(|d| !d.hidden) else {
-                return if this.state.methods.contains_key(key) || event_kind(class, key).is_some() {
-                    Err(lua_error(format!("{key} is read-only")))
-                } else {
-                    Err(not_a_member(key, class))
-                };
-            };
-            let mut converted = lua_to_value(value, def.ty, key)?;
+        _ => set_member(this, &mut host, resolved, key, value),
+    }
+}
+
+/// Writes a registry member: a property or a callback. Anything else that exists is read-only.
+fn set_member(
+    this: &LuaInstance,
+    host: &mut LuauHost<'_>,
+    class: &ResolvedClass,
+    key: &str,
+    value: &Value,
+) -> mlua::Result<()> {
+    let member = host
+        .resolve_member(class.id, key)
+        .and_then(|id| Some((id, class.members.get(usize::from(id.0))?)))
+        .filter(|(_, member)| !member.hidden);
+    let Some((id, member)) = member else {
+        return if this.state.bridge.function(key).is_some()
+            || event_kind(class.name(), key).is_some()
+        {
+            Err(lua_error(format!("{key} is read-only")))
+        } else {
+            Err(not_a_member(key, class.name()))
+        };
+    };
+    let host_error = |e| this.host_error(e, None);
+    match member.kind {
+        MemberKind::Property { desc, .. } => {
+            let mut converted = lua_to_value(value, desc.ty, key)?;
             // Like Roblox, a part's Size is clamped to 0.001..=2048 studs per axis.
             if key == "Size"
                 && let CoreValue::Vector3(size) = converted
-                && is_subclass(class, "BasePart")
+                && class.is_a_named("BasePart")
             {
                 converted = CoreValue::Vector3(transform::clamp_part_size(size));
             }
-            this.state
-                .world_mut()?
-                .set(this.id, key, converted)
-                .map_err(core_error)?;
+            host.set_property(this.id, class.id, id, converted.into())
+                .map_err(host_error)?;
             if key == "Name"
                 && let Value::String(s) = value
             {
                 *this.name_hint.borrow_mut() = String::from_utf8_lossy(&s.as_bytes()).into_owned();
             }
             Ok(())
+        }
+        MemberKind::Callback { .. } => {
+            let functions = &this.state.functions;
+            let result = match value {
+                Value::Nil => host.set_callback(this.id, class.id, id, None),
+                Value::Function(f) => {
+                    let reference = functions.add(f.clone());
+                    let result = host.set_callback(this.id, class.id, id, Some(reference));
+                    functions.release(reference);
+                    result
+                }
+                other => {
+                    return Err(lua_error(format!(
+                        "invalid value for callback {key}: expected function, got {}",
+                        other.type_name()
+                    )));
+                }
+            };
+            result.map_err(host_error)
+        }
+        MemberKind::Method { .. } | MemberKind::Signal { .. } => {
+            Err(lua_error(format!("{key} is read-only")))
         }
     }
 }
@@ -490,15 +596,16 @@ pub(crate) fn methods(
     now: &Rc<Cell<f64>>,
 ) -> mlua::Result<Vec<(&'static str, Function)>> {
     let find = lua.create_function(
-        |lua, (this, name, recursive): (UserDataRef<LuaInstance>, String, Option<bool>)| {
+        |lua, (this, name, recursive): (UserDataRef<LuaInstance>, TextArgument, Option<bool>)| {
             this.live()?;
+            let name = name.as_ref();
             let world = this.state.world()?;
             let found = if recursive == Some(true) {
                 descendants(&world, this.id).into_iter().find(
                     |&d| matches!(world.get(d, "Name"), Ok(CoreValue::String(ref s)) if *s == name),
                 )
             } else {
-                world.find_first_child(this.id, &name)
+                world.find_first_child(this.id, name)
             };
             drop(world);
             this.state.wrap_opt(lua, found)
@@ -517,15 +624,12 @@ pub(crate) fn methods(
         };
         id_list(lua, &this.state, &ids)
     })?;
-    let is_a = lua.create_function(|_, (this, class): (UserDataRef<LuaInstance>, String)| {
-        this.live()?;
-        let world = this.state.world()?;
-        Ok(if class == "PVInstance" {
-            world.is_a(this.id, "BasePart") || world.is_a(this.id, "Model")
-        } else {
-            world.is_a(this.id, &class)
-        })
-    })?;
+    let is_a = lua.create_function(
+        |_, (this, class): (UserDataRef<LuaInstance>, TextArgument)| {
+            this.live()?;
+            Ok(this.state.world()?.is_a(this.id, class.as_ref()))
+        },
+    )?;
     let destroy = lua.create_function(|_, this: UserDataRef<LuaInstance>| {
         let mut world = this.state.world_mut()?;
         if !world.is_alive(this.id) {
@@ -562,15 +666,8 @@ pub(crate) fn methods(
             Thread,
         )| {
             this.live()?;
-            let started = clock.get();
-            waiters.borrow_mut().push(Waiter {
-                thread,
-                parent: this.id,
-                name,
-                started,
-                deadline: timeout.map(|t| started + t.max(0.0)),
-                warned: false,
-            });
+            let waiter = Waiter::new(thread, this.id, name, clock.get(), timeout);
+            waiters.borrow_mut().push(waiter);
             Ok(())
         },
     )?;
@@ -632,9 +729,19 @@ pub(crate) fn constructor(lua: &Lua, state: &Rc<ApiState>) -> mlua::Result<Table
     table.set(
         "new",
         errors::guarded_fn(lua, move |lua, (class, parent): (String, Option<Value>)| {
-            // Unknown classes fall through to `create`, after the parent check, as before.
-            let refused = class_def(&class).is_some_and(|def| !def.is_creatable());
-            if refused || super::services::is_service(&class) {
+            // Unknown classes are refused after the parent check, as before.
+            let mut host = state.host();
+            let resolved = host.resolve_class(&class);
+            let refused = match resolved {
+                Some(id) => state
+                    .binding
+                    .classes
+                    .registry
+                    .class(id)
+                    .is_none_or(|known| !known.desc.is_creatable()),
+                None => super::services::is_host_object(&state, &class),
+            };
+            if refused {
                 return Err(lua_error(format!(
                     "Unable to create an Instance of type \"{class}\""
                 )));
@@ -650,13 +757,12 @@ pub(crate) fn constructor(lua: &Lua, state: &Rc<ApiState>) -> mlua::Result<Table
                 },
                 Some(_) => return Err(lua_error("Instance.new: parent must be an Instance")),
             };
-            let created = state.world_mut()?.create(&class, parent);
-            let id = created.map_err(|e| match e {
-                CoreError::UnknownClass(_) => {
-                    lua_error(format!("Unable to create an Instance of type \"{class}\""))
-                }
-                other => core_error(other),
-            })?;
+            let Some(resolved) = resolved else {
+                return Err(lua_error(format!(
+                    "Unable to create an Instance of type \"{class}\""
+                )));
+            };
+            let id = host.new_instance(resolved, parent).map_err(lua_error)?;
             state.wrap(lua, id)
         })?,
     )?;
