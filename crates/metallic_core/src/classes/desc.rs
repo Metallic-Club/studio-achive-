@@ -564,6 +564,7 @@ impl PropDesc {
 
     /// A stored value as every language's script sees it: an enum property's name becomes its item.
     /// `HostApi::get_property` goes through this, so storage can stay a String.
+    #[inline]
     pub fn script_value(&self, stored: &Value) -> ScriptValue {
         if let (Some(desc), Value::String(name)) = (self.enum_type, stored)
             && let Some(item) = desc.item_ref(name)

@@ -659,8 +659,8 @@ Studio reads the same file, so what it shows needs no Studio change. None of thi
 
 ## How to write a method
 Methods are written once, in the class file, with no knowledge of any scripting language (`classes/call.rs`; design section
-5). **Nothing routes a script call here until #462, and existing methods move with #465-#467: a method declared today is not
-visible to Luau yet.**
+5). A method declared here is visible to Luau on its class and every subclass, with no change to the binding. Existing methods
+move here with #465-#467; until then `metallic_script/src/api/bridge.rs` says which class has each.
 
 ```rust
 fn set_lit(call: &mut MethodCall) -> Result<CallOutcome, ApiError> {
@@ -689,14 +689,22 @@ MethodDesc::native("SetLit", set_lit)
   `NOT_MIGRATED_HOST_METHODS` lists the ones the old tables still dispatch; it can only shrink.
 - **Every language** goes through `HostApi` (`classes/host_api.rs`), addressed by ids: the handle's liveness and class, the
   member in the instance's own table (so `hide` and overrides apply), the context (#468), the arguments, then the body.
+- **In Luau** (`api/instance.rs`, `api/host_api.rs`): `__index` and `__newindex` resolve the name once through the class's name
+  table, then call `HostApi` by id. Order: property, method, signal, callback, child by name; a child never shadows a member.
+  Each method declaration has one Luau function per VM, cached by `DeclId`. `obj:Method()` goes through `__namecall`, reads the
+  method name the VM left for the call and skips `__index`; a call fills a per-VM argument buffer, so it allocates no list. A
+  method with `.yields()` gets a small Luau trampoline, because only Luau code can yield its own thread. Still outside the
+  generic path: the arms `api/instance.rs` keeps for #463 and #464 (`tests/generic_binding.rs` lists them and fails on a new or
+  stale one) and the bridge table above.
   `MethodDispatch` holds that order once. `metallic_core` depends on no scripting language; `tests/call_convention.rs` walks
   `Cargo.lock` to hold that.
 
 ## Where to add things
 - **A new Instance class or property:** one class file (see "How to add a class"), a test in `tests/tree.rs`; the Luau API
   picks up registry properties by name; Studio's Properties panel and Insert lists read the class file.
-- **A Luau API member:** `metallic_script/src/api/` (`instance.rs`, `datatypes.rs`, `services.rs`, `remote.rs`), a test
-  in `tests/api.rs`, and a line in `docs/luau-api.md`.
+- **A method, signal or callback of an Instance class:** its class file (see "How to write a method"), not `api/instance.rs`:
+  a test fails on a new class-name literal there. **Any other Luau API:** `metallic_script/src/api/` (`datatypes.rs`,
+  `services.rs`, `remote.rs`), a test in `tests/api.rs`, and a line in `docs/luau-api.md`.
 - **A material:** the `MATERIAL` enum in `classes/parts/base_part.rs`, its row in `metallic_render/src/materials.rs` (roughness, metalness,
   procedural detail), and density/friction in `metallic_physics`. The material table has one spare row per style
   (`ROWS_PER_STYLE` in `shading.rs`, and `CHARACTER_ROW` in `scene.wgsl`, moves up by one). Test `material_table_has_every_registry_material`
@@ -743,9 +751,9 @@ inherited member keeps its `MemberId` and `PropertyIndex` in every subclass. `cl
 `registry_classes` are thin wrappers over `classes::registry()`. Abstract classes (`Instance`, `BasePart`, `PVInstance`,
 `GuiBase2d`, `GuiObject`, `LuaSourceContainer`, `BaseScript`, `BaseRemoteEvent`, `ServiceProvider`, `DataModel`) are
 refused by `World::create`, so also by scene load; `Instance.new` also refuses `SERVICE` classes and anything else
-without `CREATABLE`. `World::create` still accepts services for engine code and hand-built worlds. Method and signal lists
-exist in the descriptors, but no script call goes through them until #462-#465 (`PVInstance.GetPivot`, `PivotTo` are
-signatures only); the Luau binding still dispatches its own tables. Inserted abstract classes change no existing `IsA` answer: a test
+without `CREATABLE`. `World::create` still accepts services for engine code and hand-built worlds. The Luau binding resolves members through these
+tables; methods the class files do not declare yet (and `PVInstance.GetPivot`, `PivotTo`, which are signatures only until #465)
+run through `metallic_script/src/api/bridge.rs`. Inserted abstract classes change no existing `IsA` answer: a test
 holds the table recorded from the old `classes.rs`.
 
 `replication::{instance_visible, property_visible, property_value}` implement the play-client filter. They hide

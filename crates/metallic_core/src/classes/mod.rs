@@ -51,7 +51,7 @@ pub use desc::{
 };
 pub use host_api::{
     Handle, HostApi, HostCall, HostMethodError, HostMethodFn, HostMethods, MethodDispatch,
-    member_of,
+    instance_class, member_of,
 };
 pub use lists::{MAX_HUMANOID_HEALTH, MAX_JUMP_POWER, MAX_SLOPE_ANGLE, MAX_WALK_SPEED};
 pub use resolve::{

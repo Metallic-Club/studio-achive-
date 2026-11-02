@@ -2,14 +2,13 @@
 //! (`docs/design/class-system.md` section 9).
 //!
 //! An enum property stays a String in core, holding the item name, so scene files, Studio and
-//! replication see names. This file is the one place that turns it into an item: a read gives the
-//! `EnumItem`, a write takes the item or its name. `part.Material == "Metal"` is false because
+//! replication see names. A read crosses the host interface as `ScriptValue::EnumItem`
+//! (`PropDesc::script_value`); this file gives it its Luau object, and a write takes the item or its
+//! name. `part.Material == "Metal"` is false because
 //! Luau does not call `__eq` across types; scripts compare with the item or with `.Name`.
 
-use std::rc::Rc;
-
+use metallic_core::Value as CoreValue;
 use metallic_core::classes::{self, EnumDesc, EnumItemRef, Registry};
-use metallic_core::{InstanceId, Value as CoreValue};
 use mlua::{AnyUserData, Lua, MetaMethod, Table, UserData, UserDataFields, UserDataMethods, Value};
 
 use super::{ApiState, errors, lua_error};
@@ -159,29 +158,6 @@ impl ApiState {
     pub(crate) fn enum_ref_value(&self, item: EnumItemRef) -> Value {
         self.enums.item(item.enum_name(), item.item())
     }
-
-    /// Reads an enum property as its item. Writes are checked against the items and defaults are
-    /// checked when the registry resolves, so a stored name is always an item; if one ever is not,
-    /// the script sees the name rather than nil.
-    pub(crate) fn get_enum_property(
-        self: &Rc<Self>,
-        lua: &Lua,
-        id: InstanceId,
-        key: &str,
-        desc: &EnumDesc,
-    ) -> mlua::Result<Value> {
-        let world = self.world()?;
-        let stored = world.get_ref(id, key).map_err(lua_error)?;
-        if let CoreValue::String(name) = stored {
-            let item = self.enums.item(desc.name, name);
-            if !matches!(item, Value::Nil) {
-                return Ok(item);
-            }
-        }
-        let stored = stored.clone();
-        drop(world);
-        self.value_to_lua(lua, stored)
-    }
 }
 
 /// What a script's write to an enum property stores: the name, from an item of that enum or from
@@ -212,7 +188,73 @@ pub(crate) fn enum_write(value: &Value, desc: &EnumDesc, prop: &str) -> mlua::Re
 #[cfg(test)]
 mod tests {
     use super::*;
-    use metallic_core::classes::resolve_with_enums;
+    use crate::api::{HostShared, install};
+    use crate::{Context, OutputSink, ScriptVm};
+    use metallic_core::World;
+    use metallic_core::classes::{HostApi, ScriptValue, resolve_with_enums};
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    struct Silent;
+
+    impl OutputSink for Silent {
+        fn print(&self, _: &str) {}
+        fn warn(&self, _: &str) {}
+        fn error(&self, _: &str) {}
+    }
+
+    /// What another language's binding sees: items out, items or names in, names stored.
+    #[test]
+    fn the_host_interface_gives_and_takes_items() {
+        let world = Rc::new(RefCell::new(World::new_with_services()));
+        let part = {
+            let mut world = world.borrow_mut();
+            let parent = world.root("Workspace");
+            world.create("Part", parent).unwrap()
+        };
+        let output = Rc::new(Silent);
+        let vm = ScriptVm::with_output(Context::Server, output.clone()).unwrap();
+        let shared = Rc::new(HostShared::default());
+        let state = install(&vm, world.clone(), shared, output).unwrap();
+        let mut host = state.host();
+        let class = host.class_of(part).unwrap();
+        let material = host.resolve_member(class, "Material").unwrap();
+        let item = |name| ScriptValue::EnumItem(EnumItemRef::new("Material", name));
+
+        assert_eq!(
+            host.get_property(part, class, material).unwrap(),
+            item("Plastic")
+        );
+        host.set_property(part, class, material, item("Metal"))
+            .unwrap();
+        assert_eq!(
+            world.borrow().get(part, "Material").unwrap(),
+            CoreValue::String("Metal".into())
+        );
+        host.set_property(part, class, material, ScriptValue::String("Glass".into()))
+            .unwrap();
+        assert_eq!(
+            host.get_property(part, class, material).unwrap(),
+            item("Glass")
+        );
+
+        let wrong = ScriptValue::EnumItem(EnumItemRef::new("PartType", "Ball"));
+        let error = host
+            .set_property(part, class, material, wrong)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("expected Enum.Material"), "{error}");
+        let made_up = host
+            .set_property(part, class, material, item("Lava"))
+            .unwrap_err()
+            .to_string();
+        assert!(made_up.contains("expected Enum.Material"), "{made_up}");
+        assert_eq!(
+            host.get_property(part, class, material).unwrap(),
+            item("Glass")
+        );
+        vm.shutdown();
+    }
 
     /// A fixture registry: no built-in enum has an alias yet.
     #[test]

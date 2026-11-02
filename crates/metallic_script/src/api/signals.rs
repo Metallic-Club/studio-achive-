@@ -72,6 +72,8 @@ pub(crate) enum EventKind {
     TagRemoved(u32),
     /// A GUI element's pointer event (`Activated`, `MouseEnter`, ...).
     Gui(super::gui::GuiEventKind),
+    /// A signal a class file declares, by its `DeclId`. #463 replaces this enum.
+    Declared(u32),
 }
 
 /// One signal: an event of one instance.
@@ -418,6 +420,7 @@ impl ApiState {
     pub(crate) fn prune_hub(&self) {
         if let Ok(world) = self.world() {
             self.hub.prune(|id| world.is_alive(id));
+            self.binding.prune(&world);
         }
     }
 }

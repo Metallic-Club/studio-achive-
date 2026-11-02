@@ -266,7 +266,7 @@ part.Size = Vector3.new(4, 1, 2) * 2
 ```
 
 ## Pivots, size and scale
-Roblox's `PVInstance` API on `BasePart` and `Model` (`IsA("PVInstance")` is true for both; it is not a registry class).
+Roblox's `PVInstance` API on `BasePart` and `Model` (`IsA("PVInstance")` is true for both; it is an abstract class above them).
 Code: `metallic_core::transform`, shared with Studio's building tools. Spec: `docs/design/building-tools.md` sections 4.3,
 4.4 and 16.
 
