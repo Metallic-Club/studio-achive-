@@ -52,6 +52,7 @@ fn vec3(w: &World, id: InstanceId, prop: &str) -> Vec3 {
 }
 
 fn start(output: Rc<Captured>) -> Game {
+    metallic_script::use_test_budgets_on_this_thread();
     let mut game = Game::open(&template(), None, output).expect("load Parkour");
     game.start().expect("start");
     game
@@ -309,6 +310,7 @@ fn parts_created_by_scripts_while_running_get_physics() {
     )
     .unwrap();
     let out = Rc::new(Captured::default());
+    metallic_script::use_test_budgets_on_this_thread();
     let mut game = Game::from_world("Test".into(), w, out.clone());
     game.start().unwrap();
     run(&mut game, FrameInput::default(), 2.0);

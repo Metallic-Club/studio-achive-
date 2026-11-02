@@ -266,24 +266,26 @@ fn a_module_runs_in_the_sandbox_with_its_own_script_global() {
 
 #[test]
 fn a_module_that_never_returns_times_out_and_the_vm_survives() {
-    let mut rig = Rig::new();
-    rig.host
-        .set_resume_budget(std::time::Duration::from_millis(200));
-    module(&rig, "Spin", "while true do end");
-    rig.server_script(
-        "Main",
-        "local ok, e = pcall(require, game.ReplicatedStorage.Spin)
+    common::real_limits_test(|| {
+        let mut rig = Rig::new();
+        rig.host
+            .set_resume_budget(std::time::Duration::from_millis(200));
+        module(&rig, "Spin", "while true do end");
+        rig.server_script(
+            "Main",
+            "local ok, e = pcall(require, game.ReplicatedStorage.Spin)
          print('result', ok)",
-    );
-    rig.server_script("Other", "print('other ran')");
-    rig.host.start().unwrap();
-    rig.run(0.0, 3);
-    let lines = rig.lines();
-    assert!(lines.contains(&"print:other ran".to_string()), "{lines:?}");
-    assert!(
-        errors(&rig).iter().any(|e| e.contains("Script timeout")),
-        "{lines:?}"
-    );
+        );
+        rig.server_script("Other", "print('other ran')");
+        rig.host.start().unwrap();
+        rig.run(0.0, 3);
+        let lines = rig.lines();
+        assert!(lines.contains(&"print:other ran".to_string()), "{lines:?}");
+        assert!(
+            errors(&rig).iter().any(|e| e.contains("Script timeout")),
+            "{lines:?}"
+        );
+    });
 }
 
 #[test]
@@ -501,29 +503,31 @@ fn a_waiter_whose_loader_was_stopped_loads_the_module_itself() {
 
 #[test]
 fn a_timeout_while_loading_is_cached_like_any_error() {
-    let mut rig = Rig::new();
-    rig.host
-        .set_resume_budget(std::time::Duration::from_millis(200));
-    module(&rig, "Spin", "print('spin ran') while true do end");
-    rig.server_script("First", "require(game.ReplicatedStorage.Spin)");
-    rig.host.start().unwrap();
-    let t = rig.run(0.0, 3);
-    rig.server_script(
-        "Second",
-        "local ok, e = pcall(require, game.ReplicatedStorage.Spin) print('second', ok, e)",
-    );
-    rig.run(t, 3);
-    let lines = rig.lines();
-    assert_eq!(
-        lines.iter().filter(|l| *l == "print:spin ran").count(),
-        1,
-        "the module does not run again: {lines:?}"
-    );
-    assert!(
-        lines.iter().any(|l| l.starts_with("print:second false")
-            && l.contains("ReplicatedStorage.Spin: Requested module experienced an error")),
-        "{lines:?}"
-    );
+    common::real_limits_test(|| {
+        let mut rig = Rig::new();
+        rig.host
+            .set_resume_budget(std::time::Duration::from_millis(200));
+        module(&rig, "Spin", "print('spin ran') while true do end");
+        rig.server_script("First", "require(game.ReplicatedStorage.Spin)");
+        rig.host.start().unwrap();
+        let t = rig.run(0.0, 3);
+        rig.server_script(
+            "Second",
+            "local ok, e = pcall(require, game.ReplicatedStorage.Spin) print('second', ok, e)",
+        );
+        rig.run(t, 3);
+        let lines = rig.lines();
+        assert_eq!(
+            lines.iter().filter(|l| *l == "print:spin ran").count(),
+            1,
+            "the module does not run again: {lines:?}"
+        );
+        assert!(
+            lines.iter().any(|l| l.starts_with("print:second false")
+                && l.contains("ReplicatedStorage.Spin: Requested module experienced an error")),
+            "{lines:?}"
+        );
+    });
 }
 
 #[test]

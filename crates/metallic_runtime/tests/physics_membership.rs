@@ -86,6 +86,7 @@ print("membership-listener-ready")
         )
         .unwrap();
     let output = Rc::new(Captured::default());
+    metallic_script::use_test_budgets_on_this_thread();
     let mut game = Game::from_world(
         "runtime-membership-fixture".to_owned(),
         world,

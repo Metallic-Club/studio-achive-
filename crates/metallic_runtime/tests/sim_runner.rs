@@ -40,7 +40,9 @@ impl Drop for Project {
 }
 
 fn command() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_metallic-sim"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_metallic-sim"));
+    command.env("METALLIC_TEST_BUDGETS", "1");
+    command
 }
 
 #[test]

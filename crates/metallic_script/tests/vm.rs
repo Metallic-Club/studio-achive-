@@ -1,5 +1,7 @@
 //! Behaviour tests for the sandboxed Luau VM.
 
+mod common;
+
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -25,11 +27,20 @@ impl OutputSink for Capture {
 }
 
 fn vm() -> (ScriptVm, Rc<Capture>) {
+    metallic_script::use_test_budgets_on_this_thread();
     let sink = Rc::new(Capture::default());
     (
         ScriptVm::with_output(Context::Server, sink.clone()).unwrap(),
         sink,
     )
+}
+
+/// A VM on the real limits, for the tests of those limits.
+fn strict_vm() -> (ScriptVm, Rc<Capture>) {
+    let (vm, sink) = vm();
+    vm.set_resume_budget(metallic_script::RESUME_BUDGET);
+    vm.set_step_budget_sec(metallic_script::STEP_BUDGET_SEC);
+    (vm, sink)
 }
 
 #[test]
@@ -72,21 +83,23 @@ fn forbidden_globals_are_nil() {
 
 #[test]
 fn endless_loop_times_out() {
-    let (mut vm, sink) = vm();
-    let start = Instant::now();
-    let err = vm
-        .run_script("Workspace.Loop", "while true do end")
-        .unwrap_err();
-    assert!(start.elapsed() < Duration::from_secs(1));
-    assert!(
-        err.message
-            .contains("Script timeout: exhausted allowed execution time"),
-        "{}",
-        err.message
-    );
-    vm.run_script("Workspace.Next", "print('still alive')")
-        .unwrap();
-    assert_eq!(sink.lines.borrow().last().unwrap(), "print:still alive");
+    common::real_limits_test(|| {
+        let (mut vm, sink) = strict_vm();
+        let start = Instant::now();
+        let err = vm
+            .run_script("Workspace.Loop", "while true do end")
+            .unwrap_err();
+        assert!(start.elapsed() < Duration::from_secs(1));
+        assert!(
+            err.message
+                .contains("Script timeout: exhausted allowed execution time"),
+            "{}",
+            err.message
+        );
+        vm.run_script("Workspace.Next", "print('still alive')")
+            .unwrap();
+        assert_eq!(sink.lines.borrow().last().unwrap(), "print:still alive");
+    });
 }
 
 #[test]
@@ -179,33 +192,35 @@ fn thread_error_goes_to_sink() {
 
 #[test]
 fn timeout_error_has_chunk_prefix() {
-    let (mut vm, sink) = vm();
-    let err = vm
-        .run_script("Workspace.Loop", "local x = 1\n\nwhile true do end")
-        .unwrap_err();
-    assert!(
-        err.message.starts_with("Workspace.Loop:3: Script timeout"),
-        "{}",
-        err.message
-    );
-    // Same inside a stepped thread (goes to the sink).
-    vm.run_script("Workspace.Late", "task.wait(1)\nwhile true do end")
-        .unwrap();
-    vm.step(2.0);
-    assert!(
-        sink.lines.borrow()[0].starts_with("error:Workspace.Late:2: Script timeout"),
-        "{:?}",
-        sink.lines.borrow()
-    );
-    // Errors raised by Rust callbacks carry the position too.
-    let err = vm
-        .run_script("T", "\ncollectgarbage('collect')")
-        .unwrap_err();
-    assert!(
-        err.message.starts_with("T:2: collectgarbage"),
-        "{}",
-        err.message
-    );
+    common::real_limits_test(|| {
+        let (mut vm, sink) = strict_vm();
+        let err = vm
+            .run_script("Workspace.Loop", "local x = 1\n\nwhile true do end")
+            .unwrap_err();
+        assert!(
+            err.message.starts_with("Workspace.Loop:3: Script timeout"),
+            "{}",
+            err.message
+        );
+        // Same inside a stepped thread (goes to the sink).
+        vm.run_script("Workspace.Late", "task.wait(1)\nwhile true do end")
+            .unwrap();
+        vm.step(2.0);
+        assert!(
+            sink.lines.borrow()[0].starts_with("error:Workspace.Late:2: Script timeout"),
+            "{:?}",
+            sink.lines.borrow()
+        );
+        // Errors raised by Rust callbacks carry the position too.
+        let err = vm
+            .run_script("T", "\ncollectgarbage('collect')")
+            .unwrap_err();
+        assert!(
+            err.message.starts_with("T:2: collectgarbage"),
+            "{}",
+            err.message
+        );
+    });
 }
 
 #[test]
@@ -233,94 +248,102 @@ fn table_error_is_formatted_safely() {
 
 #[test]
 fn nested_resume_keeps_outer_budget() {
-    let (mut vm, _) = vm();
-    let budget = vm.budget();
-    let host = vm
-        .lua()
-        .create_function(move |_, f: Function| {
-            budget.call::<()>(&f, ()).map_err(mlua::Error::external)
-        })
-        .unwrap();
-    vm.set_global("host_call", host).unwrap();
-    let start = Instant::now();
-    let err = vm
-        .run_script("T", "host_call(function() end) while true do end")
-        .unwrap_err();
-    assert!(err.message.contains("Script timeout"), "{}", err.message);
-    assert!(start.elapsed() < Duration::from_secs(1));
+    common::real_limits_test(|| {
+        let (mut vm, _) = strict_vm();
+        let budget = vm.budget();
+        let host = vm
+            .lua()
+            .create_function(move |_, f: Function| {
+                budget.call::<()>(&f, ()).map_err(mlua::Error::external)
+            })
+            .unwrap();
+        vm.set_global("host_call", host).unwrap();
+        let start = Instant::now();
+        let err = vm
+            .run_script("T", "host_call(function() end) while true do end")
+            .unwrap_err();
+        assert!(err.message.contains("Script timeout"), "{}", err.message);
+        assert!(start.elapsed() < Duration::from_secs(1));
+    });
 }
 
 #[test]
 fn call_with_budget_times_out_and_returns_values() {
-    let (mut vm, _) = vm();
-    let f: Function = vm
-        .lua()
-        .load("return function(a, b) return a + b end")
-        .eval()
-        .unwrap();
-    assert_eq!(vm.call_with_budget::<i32>(&f, (2, 3)).unwrap(), 5);
-    let g: Function = vm
-        .lua()
-        .load("return function() while true do end end")
-        .eval()
-        .unwrap();
-    let err = vm.call_with_budget::<()>(&g, ()).unwrap_err();
-    assert!(err.message.contains("Script timeout"), "{}", err.message);
-    vm.run_script("T", "print('ok')").unwrap();
+    common::real_limits_test(|| {
+        let (mut vm, _) = strict_vm();
+        let f: Function = vm
+            .lua()
+            .load("return function(a, b) return a + b end")
+            .eval()
+            .unwrap();
+        assert_eq!(vm.call_with_budget::<i32>(&f, (2, 3)).unwrap(), 5);
+        let g: Function = vm
+            .lua()
+            .load("return function() while true do end end")
+            .eval()
+            .unwrap();
+        let err = vm.call_with_budget::<()>(&g, ()).unwrap_err();
+        assert!(err.message.contains("Script timeout"), "{}", err.message);
+        vm.run_script("T", "print('ok')").unwrap();
+    });
 }
 
 #[test]
 fn many_threads_cannot_stall_one_step() {
-    let (mut vm, _) = vm();
-    for i in 0..60 {
-        vm.run_script(
-            &format!("T{i}"),
-            "task.wait() local t = os.clock() while os.clock() - t < 0.05 do end",
-        )
-        .unwrap();
-    }
-    let start = Instant::now();
-    vm.step(1.0);
-    assert!(
-        start.elapsed() < Duration::from_secs(1),
-        "{:?}",
-        start.elapsed()
-    );
-    // The rest keeps running on later steps.
-    let again = Instant::now();
-    vm.step(2.0);
-    assert!(again.elapsed() > Duration::from_millis(100));
+    common::real_limits_test(|| {
+        let (mut vm, _) = strict_vm();
+        for i in 0..60 {
+            vm.run_script(
+                &format!("T{i}"),
+                "task.wait() local t = os.clock() while os.clock() - t < 0.05 do end",
+            )
+            .unwrap();
+        }
+        let start = Instant::now();
+        vm.step(1.0);
+        assert!(
+            start.elapsed() < Duration::from_secs(1),
+            "{:?}",
+            start.elapsed()
+        );
+        // The rest keeps running on later steps.
+        let again = Instant::now();
+        vm.step(2.0);
+        assert!(again.elapsed() > Duration::from_millis(100));
+    });
 }
 
 #[test]
 fn pathological_pattern_is_rejected_or_budgeted() {
-    let (mut vm, _) = vm();
-    let start = Instant::now();
-    for src in [
-        "string.find(string.rep('a', 100000), 'a-a-a-a-a-b')",
-        "string.match(string.rep('a', 100000), '.-.-.-.-c')",
-        "string.rep('xxxxxxxxxx', 100000000)",
-        "(('x'):rep(1000)):rep(1000000)",
-        "string.format('%999999999d', 1)",
-    ] {
-        let err = vm.run_script("T", src).unwrap_err();
-        assert!(err.message.starts_with("T:1:"), "{src}: {}", err.message);
-    }
-    assert!(
-        start.elapsed() < Duration::from_secs(1),
-        "{:?}",
-        start.elapsed()
-    );
-    vm.run_script(
-        "T",
-        "assert(('hello world'):find('o w') == 5 and ('abc'):rep(3) == 'abcabcabc')",
-    )
-    .unwrap();
-    vm.run_script(
-        "T",
-        "assert(string.match('  hi  ', '^%s*(.-)%s*$') == 'hi')",
-    )
-    .unwrap();
+    common::real_limits_test(|| {
+        let (mut vm, _) = strict_vm();
+        let start = Instant::now();
+        for src in [
+            "string.find(string.rep('a', 100000), 'a-a-a-a-a-b')",
+            "string.match(string.rep('a', 100000), '.-.-.-.-c')",
+            "string.rep('xxxxxxxxxx', 100000000)",
+            "(('x'):rep(1000)):rep(1000000)",
+            "string.format('%999999999d', 1)",
+        ] {
+            let err = vm.run_script("T", src).unwrap_err();
+            assert!(err.message.starts_with("T:1:"), "{src}: {}", err.message);
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(1),
+            "{:?}",
+            start.elapsed()
+        );
+        vm.run_script(
+            "T",
+            "assert(('hello world'):find('o w') == 5 and ('abc'):rep(3) == 'abcabcabc')",
+        )
+        .unwrap();
+        vm.run_script(
+            "T",
+            "assert(string.match('  hi  ', '^%s*(.-)%s*$') == 'hi')",
+        )
+        .unwrap();
+    });
 }
 
 #[test]
@@ -374,23 +397,25 @@ fn rawset_on_library_fails() {
 
 #[test]
 fn pcall_wrapped_loop_still_times_out() {
-    let (mut vm, _) = vm();
-    let start = Instant::now();
-    let err = vm
-        .run_script(
-            "T",
-            "while true do pcall(function() while true do end end) end",
-        )
-        .unwrap_err();
-    assert!(err.message.contains("Script timeout"), "{}", err.message);
-    let err = vm
-        .run_script(
-            "T",
-            "pcall(function() while true do end end) print('survived')",
-        )
-        .unwrap_err();
-    assert!(err.message.contains("Script timeout"), "{}", err.message);
-    assert!(start.elapsed() < Duration::from_secs(1));
+    common::real_limits_test(|| {
+        let (mut vm, _) = strict_vm();
+        let start = Instant::now();
+        let err = vm
+            .run_script(
+                "T",
+                "while true do pcall(function() while true do end end) end",
+            )
+            .unwrap_err();
+        assert!(err.message.contains("Script timeout"), "{}", err.message);
+        let err = vm
+            .run_script(
+                "T",
+                "pcall(function() while true do end end) print('survived')",
+            )
+            .unwrap_err();
+        assert!(err.message.contains("Script timeout"), "{}", err.message);
+        assert!(start.elapsed() < Duration::from_secs(1));
+    });
 }
 
 #[test]

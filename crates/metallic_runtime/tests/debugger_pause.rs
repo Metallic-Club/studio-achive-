@@ -49,6 +49,7 @@ fn paused_game_does_not_advance_physics() {
         )
         .unwrap();
     let out = Rc::new(Captured::default());
+    metallic_script::use_test_budgets_on_this_thread();
     let mut game = Game::from_world("Pause".into(), world, out.clone());
     game.start().unwrap();
     let height = |game: &Game| match game.world().borrow().get(crate_part, "Position") {
@@ -97,6 +98,7 @@ fn a_breakpoint_mid_frame_stops_the_remaining_ticks() {
         )
         .unwrap();
     let out = Rc::new(Captured::default());
+    metallic_script::use_test_budgets_on_this_thread();
     let mut game = Game::from_world("Pause".into(), world, out);
     game.start().unwrap();
     game.frame(&FrameInput::default(), TICK);

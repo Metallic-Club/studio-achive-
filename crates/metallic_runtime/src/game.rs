@@ -589,6 +589,7 @@ mod tests {
         w.set(floor, "Position", Value::Vector3(Vec3::new(0.0, -0.5, 0.0)))
             .unwrap();
         w.set(floor, "Anchored", Value::Bool(true)).unwrap();
+        metallic_script::use_test_budgets_on_this_thread();
         let mut g = Game::from_world("test".into(), w, Rc::new(Silent));
         g.start().unwrap();
         g
@@ -730,6 +731,7 @@ mod tests {
         let starter = w.root("StarterGui").unwrap();
         let hud = w.create("ScreenGui", Some(starter)).unwrap();
         w.set(hud, "Name", Value::String("HUD".into())).unwrap();
+        metallic_script::use_test_budgets_on_this_thread();
         let mut g = Game::from_world("test".into(), w, Rc::new(Silent));
         g.start().unwrap();
         assert_eq!(screen_guis(&g), 1);

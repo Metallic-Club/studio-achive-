@@ -22,7 +22,7 @@ use mlua::{
 
 use super::{ApiState, errors, lua_error};
 use crate::task_lib::TIMEOUT_MSG;
-use crate::vm::{STEP_BUDGET_SEC, format_error};
+use crate::vm::format_error;
 
 /// Most connections one signal accepts.
 pub(crate) const MAX_CONNECTIONS: usize = 10_000;
@@ -222,7 +222,7 @@ impl ApiState {
             return;
         }
         self.pacing.deadline.set(Some(
-            Instant::now() + Duration::from_secs_f64(STEP_BUDGET_SEC),
+            Instant::now() + Duration::from_secs_f64(self.budget.step_budget_sec()),
         ));
         self.pacing.warned_full.set(false);
         self.pacing.handlers_this_step.set(0);

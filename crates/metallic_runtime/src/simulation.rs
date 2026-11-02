@@ -629,6 +629,7 @@ mod compatibility_tests {
                 .unwrap();
             ids.push((player, character));
         }
+        metallic_script::use_test_budgets_on_this_thread();
         let mut sim = Simulation::from_world("body animation".into(), world, Rc::new(Quiet));
         sim.start().unwrap();
         let inputs: Vec<_> = ids

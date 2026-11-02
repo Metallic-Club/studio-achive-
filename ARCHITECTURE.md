@@ -714,6 +714,11 @@ MethodDesc::native("SetLit", set_lit)
 - Tests sit next to behaviour (write the failing test first).
 - No `unwrap()` or `expect()` outside tests; return typed errors (`CoreError`, `ScriptError`, `RuntimeError`, `StudioError`).
 - Scripts can never freeze or crash the game: budgets and caps are enforced in `metallic_script`.
+- Tests that run scripts ask for the test budgets: the real ones are wall-clock time, and a busy or paging machine can stall a
+  trivial script past them. Call `metallic_script::use_test_budgets_on_this_thread()` in the rig, before the VM, host, `Game` or
+  Play session is made; a child process gets the same when the test sets `METALLIC_TEST_BUDGETS` (read in debug builds only).
+  A test of the limits sets `RESUME_BUDGET` or `STEP_BUDGET_SEC` back and may repeat its body (`tests/common/mod.rs`,
+  `real_limits_test`), because a stall fails one run and a broken limit fails every run. Details: the `metallic_script` crate doc.
 - Permissive dependency licences only; `cargo deny check licenses` stays green.
 - Benchmarks: criterion benches live in `crates/<crate>/benches/` (`cargo bench -p metallic_core --bench world` exists;
   render sync, physics step and script step follow). Budgets, bench names and the perf-CI plan are in

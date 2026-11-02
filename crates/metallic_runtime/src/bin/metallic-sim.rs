@@ -61,6 +61,7 @@ impl OutputSink for Terminal {
 }
 
 fn main() -> ExitCode {
+    metallic_script::use_test_budgets_if_a_test_asked();
     let arguments = match parse(std::env::args().skip(1)) {
         Ok(Some(arguments)) => arguments,
         Ok(None) => {

@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 /// A Probe part (anchored, at the origin) and a server Script with `source`.
 fn world(source: &str) -> (World, InstanceId) {
+    metallic_script::use_test_budgets_on_this_thread();
     let mut world = World::new_with_services();
     let ws = world.root("Workspace").unwrap();
     let part = world.create("Part", Some(ws)).unwrap();

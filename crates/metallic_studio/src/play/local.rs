@@ -213,6 +213,7 @@ mod tests {
             )
             .unwrap();
         let log = OutputLog::new(8);
+        metallic_script::use_test_budgets_on_this_thread();
         LocalPlaySession::start("Ownership", &world, log.sink()).unwrap()
     }
 

@@ -74,6 +74,7 @@ print("ready")
         )
         .unwrap();
     let output = Rc::new(Captured::default());
+    metallic_script::use_test_budgets_on_this_thread();
     let mut game = Game::from_world("touch-ended-fixture".to_owned(), world, output.clone());
     game.start().unwrap();
     for _ in 0..2 {
@@ -147,6 +148,7 @@ sensor.TouchEnded:Connect(function(hit) print("ended by " .. typeof(hit)) end)
         )
         .unwrap();
     let output = Rc::new(Captured::default());
+    metallic_script::use_test_budgets_on_this_thread();
     let mut game = Game::from_world("touch-ended-destroy".to_owned(), world, output.clone());
     game.start().unwrap();
     // Two resting anchored parts never pair; the anchored target moves in until it touches.

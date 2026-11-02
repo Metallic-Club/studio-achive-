@@ -6,12 +6,19 @@ fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
+/// The Player as a child process, on the test budgets (see `metallic_script`).
+fn player() -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_metallic-player"));
+    command.env("METALLIC_TEST_BUDGETS", "1");
+    command
+}
+
 /// Plays the Parkour template headless with the smoke scene: its test script teleports the
 /// character into Checkpoint 2, kills it, checks the respawn at Checkpoint 2, touches the Finish
 /// twice and checks exactly one `Finished` event arrived.
 #[test]
 fn parkour_smoke_scene_passes_headless() {
-    let out = Command::new(env!("CARGO_BIN_EXE_metallic-player"))
+    let out = player()
         .arg(repo_root().join("templates/parkour"))
         .args([
             "--scene",
@@ -63,7 +70,7 @@ fn game_load_rejects_missing_main_scene() {
     );
     assert!(err.to_string().contains("nowhere.mscene"), "{err}");
 
-    let out = Command::new(env!("CARGO_BIN_EXE_metallic-player"))
+    let out = player()
         .arg(&dir)
         .args(["--headless", "--frames", "1"])
         .output()
@@ -86,7 +93,7 @@ fn headless_run_plays_an_input_script() {
     )
     .expect("write script");
     let run = |script: &std::path::Path| {
-        Command::new(env!("CARGO_BIN_EXE_metallic-player"))
+        player()
             .arg(repo_root().join("templates/parkour"))
             .args(["--headless", "--frames", "120", "--input-script"])
             .arg(script)

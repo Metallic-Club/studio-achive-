@@ -110,6 +110,7 @@ impl Rig {
         w.set(script, "Source", Value::String(LOGGER.into()))
             .unwrap();
         let out = Rc::new(Lines::default());
+        metallic_script::use_test_budgets_on_this_thread();
         let mut game = Game::from_world("gui".into(), w, out.clone());
         game.start().unwrap();
         let input = InputRuntime::from_world(&game.world().borrow());

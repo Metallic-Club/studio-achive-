@@ -21,7 +21,9 @@ use crate::api::{
     InputValue, MAX_GUI_EVENTS_PER_STEP, RemoteTarget, TouchButtonInfo,
 };
 use crate::debug::{Breakpoint, Debugger};
-use crate::vm::{Context, OutputSink, RESUME_BUDGET, ScriptError, ScriptVm};
+use crate::vm::{
+    Context, OutputSink, ScriptError, ScriptVm, initial_resume_budget, initial_step_budget_sec,
+};
 
 /// Name of the one local player created by the default combined [`ScriptHost::start`].
 pub const LOCAL_PLAYER_NAME: &str = "Player1";
@@ -94,6 +96,8 @@ pub struct ScriptHost {
     cursor: Option<ChangeCursor>,
     /// Resume budget of both VMs (see [`ScriptVm::set_resume_budget`]).
     resume_budget: Duration,
+    /// Step budget of both VMs (see [`ScriptVm::set_step_budget_sec`]).
+    step_budget_sec: f64,
     /// `dispatch_input_now` already delivered this frame's action events.
     input_dispatched: bool,
     /// Debugger breakpoints by script and line; they apply to every start.
@@ -138,7 +142,8 @@ impl ScriptHost {
             inputs: Vec::new(),
             running: HashMap::new(),
             cursor: None,
-            resume_budget: RESUME_BUDGET,
+            resume_budget: initial_resume_budget(),
+            step_budget_sec: initial_step_budget_sec(),
             input_dispatched: false,
             breakpoints: BTreeMap::new(),
             break_on_error: false,
@@ -284,11 +289,20 @@ impl ScriptHost {
     }
 
     /// Sets the resume budget of active VMs, now and after the next `start`
-    /// ([`RESUME_BUDGET`] by default).
+    /// ([`crate::RESUME_BUDGET`] by default).
     pub fn set_resume_budget(&mut self, budget: Duration) {
         self.resume_budget = budget;
         for side in [&self.server, &self.client].into_iter().flatten() {
             side.vm.set_resume_budget(budget);
+        }
+    }
+
+    /// Sets the step budget of active VMs, now and after the next `start`
+    /// ([`crate::STEP_BUDGET_SEC`] by default).
+    pub fn set_step_budget_sec(&mut self, seconds: f64) {
+        self.step_budget_sec = seconds;
+        for side in [&self.server, &self.client].into_iter().flatten() {
+            side.vm.set_step_budget_sec(seconds);
         }
     }
 
@@ -637,6 +651,7 @@ impl ScriptHost {
     fn make_side(&self, context: Context) -> Result<Side, ScriptError> {
         let vm = ScriptVm::with_output(context, self.output.clone())?;
         vm.set_resume_budget(self.resume_budget);
+        vm.set_step_budget_sec(self.step_budget_sec);
         let state = api::install(
             &vm,
             self.world.clone(),

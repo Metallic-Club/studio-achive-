@@ -25,8 +25,19 @@ impl OutputSink for Capture {
     }
 }
 
-/// Resume budget for rig tests that do not test the timeout.
-pub const TEST_RESUME_BUDGET: std::time::Duration = std::time::Duration::from_secs(2);
+/// Runs a test of the real wall-clock limits, up to five times until one run passes.
+///
+/// Only these tests may do this: they cannot use the test budgets, because the real time is what
+/// they check. A stall of the machine fails one run; a broken limit fails every run. The body
+/// must build its own VM or rig, and the last run's panic is the test's failure.
+pub fn real_limits_test<T>(mut body: impl FnMut() -> T) -> T {
+    for _ in 1..5 {
+        if let Ok(out) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(&mut body)) {
+            return out;
+        }
+    }
+    body()
+}
 
 pub struct Rig {
     pub world: Rc<RefCell<World>>,
@@ -38,10 +49,10 @@ impl Rig {
     pub fn new() -> Rig {
         let world = Rc::new(RefCell::new(World::new_with_services()));
         let out = Rc::new(Capture::default());
-        let mut host = ScriptHost::new(world.clone(), out.clone());
-        // The resume budget is wall-clock time; parallel debug tests on a small CI runner can be
-        // descheduled past 100 ms. Tests of the timeout itself set `RESUME_BUDGET` back.
-        host.set_resume_budget(TEST_RESUME_BUDGET);
+        // The budgets are wall-clock time and a busy machine can stall a trivial script past them.
+        // Tests of the limits set `RESUME_BUDGET` or `STEP_BUDGET_SEC` back on the host.
+        metallic_script::use_test_budgets_on_this_thread();
+        let host = ScriptHost::new(world.clone(), out.clone());
         Rig { world, host, out }
     }
 

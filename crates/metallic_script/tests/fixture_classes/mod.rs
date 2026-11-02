@@ -240,6 +240,7 @@ impl Fixture {
     pub fn new(context: Context) -> Fixture {
         let world = Rc::new(RefCell::new(World::new_with_services()));
         let out = Rc::new(Capture::default());
+        metallic_script::use_test_budgets_on_this_thread();
         let vm = ScriptVm::with_output(context, out.clone()).expect("VM");
         let api = FixtureApi::install(&vm, world.clone(), out.clone(), &REGISTRY, &METHODS)
             .expect("the API installs over the fixture");

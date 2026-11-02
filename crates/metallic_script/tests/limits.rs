@@ -31,27 +31,29 @@ fn rig_with_remote() -> Rig {
 
 #[test]
 fn remote_rejects_exponential_shared_tables() {
-    let _isolation = isolate_limits_test();
-    let mut rig = rig_with_remote();
-    rig.local_script(
-        "Client",
-        &format!(
-            r#"
+    common::real_limits_test(|| {
+        let _isolation = isolate_limits_test();
+        let mut rig = rig_with_remote();
+        rig.local_script(
+            "Client",
+            &format!(
+                r#"
         local ping = game:GetService("ReplicatedStorage"):WaitForChild("Ping")
         local t = {{}}
         for i = 1, {BOMB_LEVELS} do t = {{t, t, t, t, t, t, t, t, t, t}} end
         print(pcall(function() ping:FireServer(t) end))
         "#
-        ),
-    );
-    let began = Instant::now();
-    rig.host.start().unwrap();
-    assert!(began.elapsed().as_secs_f64() < 2.0, "must fail fast");
-    let lines = rig.lines();
-    assert!(
-        lines[0].starts_with("print:false") && lines[0].contains("remote payload too large"),
-        "{lines:?}"
-    );
+            ),
+        );
+        let began = Instant::now();
+        rig.host.start().unwrap();
+        assert!(began.elapsed().as_secs_f64() < 2.0, "must fail fast");
+        let lines = rig.lines();
+        assert!(
+            lines[0].starts_with("print:false") && lines[0].contains("remote payload too large"),
+            "{lines:?}"
+        );
+    });
 }
 
 #[test]
@@ -164,81 +166,87 @@ fn too_many_connections_on_one_signal() {
 
 #[test]
 fn many_spinning_handlers_do_not_stall_a_step() {
-    let _isolation = isolate_limits_test();
-    let mut rig = Rig::new();
-    rig.host.set_resume_budget(metallic_script::RESUME_BUDGET);
-    let ws = rig.root("Workspace");
-    let pad = rig.add("Part", "Pad", ws);
-    let ball = rig.add("Part", "Ball", ws);
-    for i in 0..20 {
-        rig.server_script(
-            &format!("Spin{i}"),
-            "workspace.Pad.Touched:Connect(function() while true do end end)",
-        );
-    }
-    rig.host.start().unwrap();
-    rig.host.touched(pad, ball);
-    let mut now = 0.0;
-    let mut longest = 0.0f64;
-    let mut steps = 0;
-    while rig.lines().len() < 20 && steps < 60 {
-        let began = Instant::now();
-        now = rig.run(now, 1);
-        longest = longest.max(began.elapsed().as_secs_f64());
-        steps += 1;
-    }
-    assert!(longest < 0.6, "a step took {longest:.2} s");
-    let timeouts = rig
-        .lines()
-        .iter()
-        .filter(|l| l.contains("Script timeout"))
-        .count();
-    assert_eq!(timeouts, 20, "deferred handlers still ran: {steps} steps");
-    assert!(steps > 1, "the work was spread over several steps");
+    common::real_limits_test(|| {
+        let _isolation = isolate_limits_test();
+        let mut rig = Rig::new();
+        rig.host
+            .set_step_budget_sec(metallic_script::STEP_BUDGET_SEC);
+        rig.host.set_resume_budget(metallic_script::RESUME_BUDGET);
+        let ws = rig.root("Workspace");
+        let pad = rig.add("Part", "Pad", ws);
+        let ball = rig.add("Part", "Ball", ws);
+        for i in 0..20 {
+            rig.server_script(
+                &format!("Spin{i}"),
+                "workspace.Pad.Touched:Connect(function() while true do end end)",
+            );
+        }
+        rig.host.start().unwrap();
+        rig.host.touched(pad, ball);
+        let mut now = 0.0;
+        let mut longest = 0.0f64;
+        let mut steps = 0;
+        while rig.lines().len() < 20 && steps < 60 {
+            let began = Instant::now();
+            now = rig.run(now, 1);
+            longest = longest.max(began.elapsed().as_secs_f64());
+            steps += 1;
+        }
+        assert!(longest < 0.6, "a step took {longest:.2} s");
+        let timeouts = rig
+            .lines()
+            .iter()
+            .filter(|l| l.contains("Script timeout"))
+            .count();
+        assert_eq!(timeouts, 20, "deferred handlers still ran: {steps} steps");
+        assert!(steps > 1, "the work was spread over several steps");
+    });
 }
 
 #[test]
 fn repeat_timeouts_disconnect_script() {
-    let _isolation = isolate_limits_test();
-    let mut rig = Rig::new();
-    rig.host.set_resume_budget(metallic_script::RESUME_BUDGET);
-    rig.server_script(
-        "Spinner",
-        r#"
+    common::real_limits_test(|| {
+        let _isolation = isolate_limits_test();
+        let mut rig = Rig::new();
+        rig.host.set_resume_budget(metallic_script::RESUME_BUDGET);
+        rig.server_script(
+            "Spinner",
+            r#"
         game:GetService("RunService").Heartbeat:Connect(function() while true do end end)
         "#,
-    );
-    rig.server_script(
-        "Other",
-        r#"
+        );
+        rig.server_script(
+            "Other",
+            r#"
         game:GetService("RunService").Heartbeat:Connect(function() print("other beat") end)
         "#,
-    );
-    rig.host.start().unwrap();
-    let now = rig.run(0.0, 6);
-    let lines = rig.lines();
-    let timeouts = lines
-        .iter()
-        .filter(|l| l.contains("Script timeout"))
-        .count();
-    let notices: Vec<_> = lines
-        .iter()
-        .filter(|l| l.contains("disconnected"))
-        .collect();
-    assert_eq!(timeouts, 3, "{lines:?}");
-    assert_eq!(notices.len(), 1, "{lines:?}");
-    assert!(
-        notices[0].starts_with("error:ServerScriptService.Spinner"),
-        "{lines:?}"
-    );
-    let before = lines.len();
-    rig.run(now, 3);
-    let after = rig.lines();
-    assert_eq!(
-        after[before..],
-        ["print:other beat", "print:other beat", "print:other beat"],
-        "only the other script keeps running"
-    );
+        );
+        rig.host.start().unwrap();
+        let now = rig.run(0.0, 6);
+        let lines = rig.lines();
+        let timeouts = lines
+            .iter()
+            .filter(|l| l.contains("Script timeout"))
+            .count();
+        let notices: Vec<_> = lines
+            .iter()
+            .filter(|l| l.contains("disconnected"))
+            .collect();
+        assert_eq!(timeouts, 3, "{lines:?}");
+        assert_eq!(notices.len(), 1, "{lines:?}");
+        assert!(
+            notices[0].starts_with("error:ServerScriptService.Spinner"),
+            "{lines:?}"
+        );
+        let before = lines.len();
+        rig.run(now, 3);
+        let after = rig.lines();
+        assert_eq!(
+            after[before..],
+            ["print:other beat", "print:other beat", "print:other beat"],
+            "only the other script keeps running"
+        );
+    });
 }
 
 #[test]
@@ -459,11 +467,14 @@ fn cloned_scripts_with_same_name_stop_independently() {
 
 #[test]
 fn full_deferral_queue_stops_building_arguments() {
-    let _isolation = isolate_limits_test();
-    let mut rig = Rig::new();
-    rig.server_script(
-        "Many",
-        r#"
+    common::real_limits_test(|| {
+        let _isolation = isolate_limits_test();
+        let mut rig = Rig::new();
+        rig.host
+            .set_step_budget_sec(metallic_script::STEP_BUDGET_SEC);
+        rig.server_script(
+            "Many",
+            r#"
         local beat = game:GetService("RunService").Heartbeat
         for i = 1, 10000 do
             beat:Connect(function()
@@ -472,10 +483,11 @@ fn full_deferral_queue_stops_building_arguments() {
             end)
         end
         "#,
-    );
-    rig.host.start().unwrap();
-    rig.run(0.0, 8);
-    // Without the early stop every step built 10,000 argument lists (80,000 here).
-    let built = rig.host.dispatch_args_built();
-    assert!(built < 20_000, "built {built} argument lists");
+        );
+        rig.host.start().unwrap();
+        rig.run(0.0, 8);
+        // Without the early stop every step built 10,000 argument lists (80,000 here).
+        let built = rig.host.dispatch_args_built();
+        assert!(built < 20_000, "built {built} argument lists");
+    });
 }

@@ -272,18 +272,20 @@ fn set_local_changes_value_after_resume() {
 
 #[test]
 fn endless_loop_still_times_out_when_not_paused() {
-    let mut rig = Rig::new();
-    rig.host.set_resume_budget(RESUME_BUDGET);
-    let other = rig.server_script("Other", "local function never()\n    print('never')\nend\n");
-    rig.host
-        .debugger()
-        .set_breakpoint(other, 2, Breakpoint::Plain);
-    rig.server_script("Spin", "while true do end\n");
-    rig.host.start().unwrap();
-    let lines = rig.lines();
-    assert_eq!(lines.len(), 1, "{lines:?}");
-    assert!(lines[0].contains("Script timeout"), "{lines:?}");
-    assert!(!rig.host.is_paused());
+    common::real_limits_test(|| {
+        let mut rig = Rig::new();
+        rig.host.set_resume_budget(RESUME_BUDGET);
+        let other = rig.server_script("Other", "local function never()\n    print('never')\nend\n");
+        rig.host
+            .debugger()
+            .set_breakpoint(other, 2, Breakpoint::Plain);
+        rig.server_script("Spin", "while true do end\n");
+        rig.host.start().unwrap();
+        let lines = rig.lines();
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(lines[0].contains("Script timeout"), "{lines:?}");
+        assert!(!rig.host.is_paused());
+    });
 }
 
 #[test]

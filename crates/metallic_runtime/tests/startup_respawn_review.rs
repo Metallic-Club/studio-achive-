@@ -53,6 +53,7 @@ print("startup-complete")
     );
     world.set(script, "Source", Value::String(source)).unwrap();
     let output = Rc::new(Capture::default());
+    metallic_script::use_test_budgets_on_this_thread();
     let mut sim = Simulation::from_world("PR419 startup diagnostic".into(), world, output.clone());
     sim.start().unwrap();
     // Prove eager startup, rather than assuming the mutation runs before first tick.

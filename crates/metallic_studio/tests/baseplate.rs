@@ -18,6 +18,7 @@ fn repo_templates() -> PathBuf {
 /// Opens the project with the Player's code path, plays two idle seconds and returns the
 /// character root's height.
 fn play_two_seconds(project: &Path) -> f64 {
+    metallic_script::use_test_budgets_on_this_thread();
     let mut game = Game::open(project, None, Rc::new(StdoutSink)).expect("open the project");
     game.start().expect("start");
     for _ in 0..(2.0 / TICK).round() as usize {

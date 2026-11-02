@@ -122,6 +122,7 @@ fn input_frame_makes_no_heap_allocation_once_warm() {
     let key = w.create("InputBinding", Some(action)).unwrap();
     w.set(key, "KeyCode", Value::String("Space".into()))
         .unwrap();
+    metallic_script::use_test_budgets_on_this_thread();
     let mut game = Game::from_world("alloc".into(), w, Rc::new(StdoutSink));
     game.start().unwrap();
     let mut rt = InputRuntime::from_world(&game.world().borrow());

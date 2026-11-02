@@ -543,6 +543,7 @@ impl Bot {
 
 fn open_parkour() -> Game {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../templates/parkour");
+    metallic_script::use_test_budgets_on_this_thread();
     let mut game = Game::open(&dir, None, Rc::new(StdoutSink)).expect("load Parkour");
     game.start().expect("start");
     game

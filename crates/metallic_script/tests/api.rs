@@ -454,30 +454,32 @@ fn wait_for_child_resumes_times_out_and_warns() {
 
 #[test]
 fn runaway_handler_times_out_and_engine_continues() {
-    let mut rig = Rig::new();
-    rig.host.set_resume_budget(metallic_script::RESUME_BUDGET);
-    let ws = rig.root("Workspace");
-    let pad = rig.add("Part", "Pad", ws);
-    let ball = rig.add("Part", "Ball", ws);
-    rig.server_script(
-        "S",
-        r#"
+    common::real_limits_test(|| {
+        let mut rig = Rig::new();
+        rig.host.set_resume_budget(metallic_script::RESUME_BUDGET);
+        let ws = rig.root("Workspace");
+        let pad = rig.add("Part", "Pad", ws);
+        let ball = rig.add("Part", "Ball", ws);
+        rig.server_script(
+            "S",
+            r#"
         workspace.Pad.Touched:Connect(function() while true do end end)
         workspace.Pad.Touched:Connect(function() print("second handler ran") end)
         "#,
-    );
-    start(&mut rig);
-    rig.host.touched(pad, ball);
-    let began = std::time::Instant::now();
-    rig.run(0.0, 1);
-    assert!(began.elapsed().as_secs_f64() < 5.0);
-    let lines = rig.lines();
-    assert!(
-        lines[0].starts_with("error:ServerScriptService.S:2: ")
-            && lines[0].contains("Script timeout"),
-        "{lines:?}"
-    );
-    assert_eq!(lines[1], "print:second handler ran");
+        );
+        start(&mut rig);
+        rig.host.touched(pad, ball);
+        let began = std::time::Instant::now();
+        rig.run(0.0, 1);
+        assert!(began.elapsed().as_secs_f64() < 5.0);
+        let lines = rig.lines();
+        assert!(
+            lines[0].starts_with("error:ServerScriptService.S:2: ")
+                && lines[0].contains("Script timeout"),
+            "{lines:?}"
+        );
+        assert_eq!(lines[1], "print:second handler ran");
+    });
 }
 
 #[test]

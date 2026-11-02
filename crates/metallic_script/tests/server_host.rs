@@ -1,14 +1,13 @@
 //! Server-only host behavior through real Scripts, events and journal updates.
 mod common;
 
-use common::{Rig, TEST_RESUME_BUDGET};
+use common::Rig;
 use metallic_core::Value;
 use metallic_script::ScriptHost;
 
 fn server_rig() -> Rig {
     let mut rig = Rig::new();
     rig.host = ScriptHost::new_server(rig.world.clone(), rig.out.clone());
-    rig.host.set_resume_budget(TEST_RESUME_BUDGET);
     rig
 }
 

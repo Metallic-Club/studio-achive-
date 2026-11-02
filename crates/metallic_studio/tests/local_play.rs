@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 fn scene(source: &str) -> (World, InstanceId) {
+    metallic_script::use_test_budgets_on_this_thread();
     let mut world = World::new_with_services();
     let workspace = world.root("Workspace").unwrap();
     let part = world.create("Part", Some(workspace)).unwrap();

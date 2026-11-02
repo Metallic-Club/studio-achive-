@@ -21,6 +21,15 @@
 //! instance's class and calls `HostApi` (`api/host_api.rs`), so a member a class file declares is
 //! visible to scripts with no change here. [`host_methods`] is the table of methods core declares
 //! `Host` and this crate implements.
+//!
+//! ## Budgets in tests
+//!
+//! The execution budgets are wall-clock time, so a busy or paging machine can stall a trivial
+//! script past them. A test rig calls [`use_test_budgets_on_this_thread`] before it makes a VM,
+//! host, `Game` or Play session; a test of the limits sets them back. A binary that tests run as
+//! a child process gets the same from [`use_test_budgets_if_a_test_asked`]. Nothing shipped calls
+//! the first, and the second reads its variable in debug builds only, so creators always get the
+//! real limits.
 
 #![warn(missing_docs)]
 
@@ -45,5 +54,6 @@ pub use debug::{Breakpoint, DebugState, Debugger, Frame, PauseReason, Scope, Var
 pub use host::{LOCAL_PLAYER_NAME, ScriptHost, ScriptRole};
 pub use vm::{
     Budget, Context, MEMORY_LIMIT_BYTES, OutputSink, RESUME_BUDGET, STEP_BUDGET_SEC, ScriptError,
-    ScriptVm,
+    ScriptVm, TEST_RESUME_BUDGET, TEST_STEP_BUDGET_SEC, use_test_budgets_if_a_test_asked,
+    use_test_budgets_on_this_thread,
 };

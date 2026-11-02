@@ -74,6 +74,7 @@ fn a_game_created_from_empty_plays_on_the_spawn() {
         "the preview stays out"
     );
 
+    metallic_script::use_test_budgets_on_this_thread();
     let mut game = Game::open(&target, None, Rc::new(StdoutSink)).expect("open");
     game.start().expect("start");
     for _ in 0..(2.0 / TICK).round() as usize {
