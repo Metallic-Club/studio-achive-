@@ -35,10 +35,10 @@ impl OutputSink for Capture {
 
 /// Runs `source` in a server script of a fresh host and gives back what it printed.
 fn on_host(source: &str) -> Vec<String> {
+    metallic_script::use_test_budgets_on_this_thread();
     let world = Rc::new(RefCell::new(World::new_with_services()));
     let out = Rc::new(Capture::default());
     let mut host = ScriptHost::new(world.clone(), out.clone());
-    host.set_resume_budget(std::time::Duration::from_secs(2));
     {
         let mut world = world.borrow_mut();
         let services = world.root("ServerScriptService").unwrap();
@@ -282,6 +282,7 @@ struct Fixture {
 
 impl Fixture {
     fn new(context: Context) -> Fixture {
+        metallic_script::use_test_budgets_on_this_thread();
         let world = Rc::new(RefCell::new(World::new_with_services()));
         let out = Rc::new(Capture::default());
         let vm = ScriptVm::with_output(context, out.clone()).expect("VM");
@@ -721,6 +722,7 @@ fn a_method_or_signal_cannot_be_written_and_a_signal_is_not_a_function() {
 
 #[test]
 fn a_stopped_host_tells_the_world_it_listens_to_nothing() {
+    metallic_script::use_test_budgets_on_this_thread();
     let world = Rc::new(RefCell::new(World::new_with_services()));
     let out = Rc::new(Capture::default());
     let mut host = ScriptHost::new_server(world.clone(), out.clone());
