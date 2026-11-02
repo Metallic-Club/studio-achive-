@@ -1,4 +1,4 @@
-//! Input in Luau (docs/design/input-actions.md section 5): the `Enum` table, `InputAction`
+//! Input in Luau (docs/design/input-actions.md section 5): `InputAction`
 //! members, `ContextActionService` and the last-input members of `UserInputService`.
 //!
 //! The input runtime lives in a crate above this one, so the host (the owner of a
@@ -14,7 +14,7 @@ use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use metallic_core::classes::{INPUT_ACTION_TYPES, INPUT_TRIGGERS, TOUCH_SLOTS};
+use metallic_core::classes::{KEY_CODE, USER_INPUT_TYPE};
 use metallic_core::{InstanceId, Value as CoreValue, Vec3, World};
 use mlua::{
     AnyUserData, Function, Lua, MetaMethod, Table, UserData, UserDataFields, UserDataMethods,
@@ -22,6 +22,7 @@ use mlua::{
 };
 
 use super::datatypes::{LuaUDim2, LuaVector2, LuaVector3, udim2};
+use super::enums::{Enums, enum_item};
 use super::errors;
 use super::signals::{EventKind, LuaSignal};
 use super::{ApiState, lua_error};
@@ -41,123 +42,7 @@ const CAS_LOCAL_ONLY: &str = "ContextActionService can only be used from a Local
 
 /// Names of `Enum.KeyCode`: `Unknown`, then the controls of the input runtime (a test in
 /// `metallic_runtime` keeps the two lists equal).
-pub const KEY_CODES: &[&str] = &[
-    "Unknown",
-    "A",
-    "B",
-    "C",
-    "D",
-    "E",
-    "F",
-    "G",
-    "H",
-    "I",
-    "J",
-    "K",
-    "L",
-    "M",
-    "N",
-    "O",
-    "P",
-    "Q",
-    "R",
-    "S",
-    "T",
-    "U",
-    "V",
-    "W",
-    "X",
-    "Y",
-    "Z",
-    "Zero",
-    "One",
-    "Two",
-    "Three",
-    "Four",
-    "Five",
-    "Six",
-    "Seven",
-    "Eight",
-    "Nine",
-    "F1",
-    "F2",
-    "F3",
-    "F4",
-    "F5",
-    "F6",
-    "F7",
-    "F8",
-    "F9",
-    "F10",
-    "F11",
-    "F12",
-    "Space",
-    "Return",
-    "Tab",
-    "Backspace",
-    "Escape",
-    "LeftShift",
-    "RightShift",
-    "LeftControl",
-    "RightControl",
-    "LeftAlt",
-    "RightAlt",
-    "Up",
-    "Down",
-    "Left",
-    "Right",
-    "Home",
-    "End",
-    "PageUp",
-    "PageDown",
-    "Insert",
-    "Delete",
-    "Comma",
-    "Period",
-    "Slash",
-    "Semicolon",
-    "Quote",
-    "LeftBracket",
-    "RightBracket",
-    "BackSlash",
-    "Minus",
-    "Equals",
-    "Backquote",
-    "MouseButton1",
-    "MouseButton2",
-    "MouseButton3",
-    "MouseWheel",
-    "MouseDelta",
-    "MousePosition",
-    "ButtonA",
-    "ButtonB",
-    "ButtonX",
-    "ButtonY",
-    "ButtonL1",
-    "ButtonR1",
-    "ButtonL2",
-    "ButtonR2",
-    "ButtonL3",
-    "ButtonR3",
-    "ButtonSelect",
-    "ButtonStart",
-    "DPadUp",
-    "DPadDown",
-    "DPadLeft",
-    "DPadRight",
-    "Thumbstick1",
-    "Thumbstick2",
-    "TouchStick",
-    "TouchLook",
-    "TouchButton",
-    "TouchButton1",
-    "TouchButton2",
-    "TouchButton3",
-    "TouchButton4",
-    "TouchButton5",
-    "TouchButton6",
-    "TouchButton7",
-];
+pub const KEY_CODES: &[&str] = KEY_CODE.items;
 
 /// First and last keyboard key of [`KEY_CODES`] (what `UserInputType.Keyboard` binds).
 const KEYBOARD_RANGE: (&str, &str) = ("A", "Backquote");
@@ -165,29 +50,7 @@ const KEYBOARD_RANGE: (&str, &str) = ("A", "Backquote");
 const GAMEPAD_RANGE: (&str, &str) = ("ButtonA", "DPadRight");
 
 /// Names of `Enum.UserInputType`.
-pub const USER_INPUT_TYPES: &[&str] = &[
-    "MouseButton1",
-    "MouseButton2",
-    "MouseButton3",
-    "MouseWheel",
-    "MouseMovement",
-    "Touch",
-    "Keyboard",
-    "Focus",
-    "Gamepad1",
-    "Gamepad2",
-    "Gamepad3",
-    "Gamepad4",
-    "TextInput",
-    "None",
-];
-
-const USER_INPUT_STATES: &[&str] = &["Begin", "Change", "End", "Cancel", "None"];
-const CONTEXT_ACTION_RESULTS: &[&str] = &["Sink", "Pass"];
-const PREFERRED_INPUTS: &[&str] = &["KeyboardAndMouse", "Gamepad", "Touch"];
-/// `(name, value)`: Metallic's numbers (spec 5.2).
-const CONTEXT_ACTION_PRIORITIES: &[(&str, i64)] =
-    &[("Low", 1000), ("Medium", 2000), ("High", 3000)];
+pub const USER_INPUT_TYPES: &[&str] = USER_INPUT_TYPE.items;
 
 /// The value of an action as the host reports it.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -358,148 +221,6 @@ impl InputShared {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Enums
-
-/// A value of an `Enum`.
-pub(crate) struct LuaEnumItem {
-    enum_name: &'static str,
-    name: &'static str,
-    value: i64,
-}
-
-impl UserData for LuaEnumItem {
-    fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
-        fields.add_meta_field(MetaMethod::Type, "EnumItem");
-        fields.add_field_method_get("Name", |_, this| Ok(this.name));
-        fields.add_field_method_get("Value", |_, this| Ok(this.value));
-    }
-
-    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        methods.add_meta_function(MetaMethod::Eq, |_, (a, b): (Value, Value)| {
-            Ok(match (enum_item(&a), enum_item(&b)) {
-                (Some(a), Some(b)) => a.0 == b.0 && a.1 == b.1,
-                _ => false,
-            })
-        });
-        methods.add_meta_method(MetaMethod::ToString, |_, this, ()| {
-            Ok(format!("Enum.{}.{}", this.enum_name, this.name))
-        });
-    }
-}
-
-/// `(enum, item, value)` of an `EnumItem` value.
-pub(crate) fn enum_item(v: &Value) -> Option<(&'static str, &'static str, i64)> {
-    match v {
-        Value::UserData(ud) => ud
-            .borrow::<LuaEnumItem>()
-            .ok()
-            .map(|i| (i.enum_name, i.name, i.value)),
-        _ => None,
-    }
-}
-
-/// The `Enum` table and Rust-side access to its items.
-/// `Enum.RotationOrder` item names (used by `CFrame.fromEulerAngles`).
-static ROTATION_ORDERS: [&str; 6] = {
-    let all = metallic_core::RotationOrder::ALL;
-    let mut names = [""; 6];
-    let mut i = 0;
-    while i < 6 {
-        names[i] = all[i].name();
-        i += 1;
-    }
-    names
-};
-
-/// `Enum.NormalId` item names (used by `BasePart:Resize`).
-static NORMAL_IDS: [&str; 6] = {
-    let all = metallic_core::transform::NormalId::ALL;
-    let mut names = [""; 6];
-    let mut i = 0;
-    while i < 6 {
-        names[i] = all[i].name();
-        i += 1;
-    }
-    names
-};
-
-pub(crate) struct Enums {
-    pub(crate) table: Table,
-    items: HashMap<(&'static str, &'static str), AnyUserData>,
-}
-
-impl Enums {
-    pub(crate) fn install(lua: &Lua) -> mlua::Result<Enums> {
-        let named = |names: &'static [&'static str]| -> Vec<(&'static str, i64)> {
-            names
-                .iter()
-                .enumerate()
-                .map(|(i, n)| (*n, i as i64))
-                .collect()
-        };
-        let all: Vec<(&'static str, Vec<(&'static str, i64)>)> = vec![
-            ("KeyCode", named(KEY_CODES)),
-            ("UserInputType", named(USER_INPUT_TYPES)),
-            ("UserInputState", named(USER_INPUT_STATES)),
-            ("InputActionType", named(INPUT_ACTION_TYPES)),
-            ("InputTrigger", named(INPUT_TRIGGERS)),
-            ("TouchSlot", named(TOUCH_SLOTS)),
-            ("ContextActionResult", named(CONTEXT_ACTION_RESULTS)),
-            ("PreferredInput", named(PREFERRED_INPUTS)),
-            ("ContextActionPriority", CONTEXT_ACTION_PRIORITIES.to_vec()),
-            ("RotationOrder", named(&ROTATION_ORDERS)),
-            ("NormalId", named(&NORMAL_IDS)),
-            ("CameraType", named(metallic_core::classes::CAMERA_TYPES)),
-        ];
-        let table = lua.create_table()?;
-        let mut items = HashMap::new();
-        for (enum_name, members) in all {
-            let sub = lua.create_table()?;
-            for (name, value) in members {
-                let ud = lua.create_userdata(LuaEnumItem {
-                    enum_name,
-                    name,
-                    value,
-                })?;
-                sub.raw_set(name, ud.clone())?;
-                items.insert((enum_name, name), ud);
-            }
-            strict(lua, &sub, format!("Enum.{enum_name}"))?;
-            table.raw_set(enum_name, sub)?;
-        }
-        strict(lua, &table, "Enum".to_string())?;
-        Ok(Enums { table, items })
-    }
-
-    fn item(&self, enum_name: &str, name: &str) -> Value {
-        self.items
-            .iter()
-            .find(|((e, n), _)| *e == enum_name && *n == name)
-            .map_or(Value::Nil, |(_, ud)| Value::UserData(ud.clone()))
-    }
-}
-
-/// Makes `table` read-only and turns a missing member into an error.
-fn strict(lua: &Lua, table: &Table, label: String) -> mlua::Result<()> {
-    let meta = lua.create_table()?;
-    meta.set(
-        "__index",
-        errors::guarded_fn(lua, move |_, (_, key): (Value, Value)| {
-            Err::<Value, _>(lua_error(format!(
-                "{} is not a valid member of {label}",
-                match &key {
-                    Value::String(s) => s.to_string_lossy(),
-                    other => other.type_name().to_string(),
-                }
-            )))
-        })?,
-    )?;
-    table.set_metatable(Some(meta))?;
-    table.set_readonly(true);
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------------------------
 // Action state and event delivery
 
 fn zero_for(ty: &str) -> InputValue {
@@ -587,10 +308,6 @@ impl ApiState {
             self.require_client()?;
         }
         Ok(())
-    }
-
-    pub(crate) fn enum_value(&self, enum_name: &str, name: &str) -> Value {
-        self.enums.item(enum_name, name)
     }
 
     fn input_object(&self, lua: &Lua, state: &str, value: InputValue) -> mlua::Result<Table> {

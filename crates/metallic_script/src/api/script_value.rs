@@ -5,12 +5,12 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use metallic_core::classes::{EnumItemRef, FunctionRef, ScriptValue};
+use metallic_core::classes::{FunctionRef, ScriptValue};
 use mlua::{Function, Lua, Table, Value};
 
 use super::cframe::{LuaCFrame, cframe};
 use super::datatypes::{LuaColor3, LuaUDim2, LuaVector3, color, udim2, vector};
-use super::input::enum_item;
+use super::enums::enum_item_ref;
 use super::instance::LuaInstance;
 use super::{ApiState, lua_error};
 
@@ -94,8 +94,8 @@ fn to_script(state: &ApiState, value: &Value, depth: usize) -> mlua::Result<Scri
                 ScriptValue::Color3(c)
             } else if let Some(u) = udim2(value) {
                 ScriptValue::UDim2(u)
-            } else if let Some((enum_name, item, _)) = enum_item(value) {
-                ScriptValue::EnumItem(EnumItemRef::new(enum_name, item))
+            } else if let Some(item) = enum_item_ref(value) {
+                ScriptValue::EnumItem(item)
             } else {
                 return Err(unsupported(value));
             }
@@ -171,7 +171,7 @@ impl ApiState {
             ScriptValue::CFrame(cf) => Value::UserData(lua.create_userdata(LuaCFrame(*cf))?),
             ScriptValue::Color3(c) => Value::UserData(lua.create_userdata(LuaColor3(c))?),
             ScriptValue::UDim2(u) => Value::UserData(lua.create_userdata(LuaUDim2(u))?),
-            ScriptValue::EnumItem(item) => self.enum_value(item.enum_name(), item.item()),
+            ScriptValue::EnumItem(item) => self.enum_ref_value(item),
             ScriptValue::Function(reference) => match self.functions.get(reference) {
                 Some(function) => Value::Function(function),
                 None => Value::Nil,

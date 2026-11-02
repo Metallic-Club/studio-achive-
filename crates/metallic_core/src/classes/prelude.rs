@@ -24,6 +24,15 @@ pub const fn color(name: &'static str, default: fn() -> Value) -> PropDesc {
     PropDesc::new(name, ValueType::Color3, default).range(0.0, 255.0)
 }
 
+/// A String holding an item name of `desc`.
+pub const fn enumerated(
+    name: &'static str,
+    default: fn() -> Value,
+    desc: &'static EnumDesc,
+) -> PropDesc {
+    PropDesc::new(name, ValueType::String, default).enum_of(desc)
+}
+
 /// A String restricted to `allowed`.
 pub const fn choice(
     name: &'static str,

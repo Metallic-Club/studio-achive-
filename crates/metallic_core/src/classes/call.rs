@@ -46,8 +46,9 @@ pub struct FunctionRef(pub u64);
 
 /// An item of an enum.
 ///
-/// Held by name until `EnumDesc` gives enums ids (#469). The fields are private so that change
-/// reaches no caller.
+/// Held by name: enum and item names are static and unique, a ref means the same thing under any
+/// registry, and a binding needs the names anyway. [`EnumDesc::item_ref`](super::EnumDesc::item_ref)
+/// makes one from a name or an alias; [`new`](EnumItemRef::new) checks nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct EnumItemRef {
     enum_name: &'static str,

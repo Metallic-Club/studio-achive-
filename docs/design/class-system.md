@@ -342,7 +342,7 @@ pub enum ScriptValue {
     CFrame(Box<CFrame>),
     Color3(Color3),
     UDim2(UDim2),
-    EnumItem(EnumItemRef),       // { enum: EnumId, item: u16 }
+    EnumItem(EnumItemRef),       // the enum's and the item's static names
     Array(Vec<ScriptValue>),
     Map(Vec<(ScriptValue, ScriptValue)>),
     Function(FunctionRef),       // a binding-owned reference to script code (callbacks, signal handlers)
@@ -515,16 +515,18 @@ may set a default for its own members.
 
 ## 9. Enums and data types
 
-**Enums** (#469): `EnumDesc { name, items: &[EnumItemDesc { name, value }], aliases }`, declared in the class file
-that owns them (`Material` and `Shape` in `base_part.rs`, `InputActionType` in `input_action.rs`). Enums used by
+**Enums** (#469): `EnumDesc { name, items: &[&str], numbers: Option<&[i64]>, aliases: &[(old, item)], description }`,
+declared in the class file that owns them (`Material` and `PartType` in `base_part.rs`, `InputActionType` in `input_action.rs`). Enums used by
 several classes live in `classes/enums/<name>.rs`. The `Enum` global, Studio dropdowns, `.d.luau` and WIT enums are
 built from them.
 
 - Storage does not change: an enum property stays a `String` value holding the item name, so scene files and
   `registry_hash` meaning stay the same. `allowed` is derived from the enum's items.
-- Writes accept the `EnumItem` or its name (today's scripts keep working). Whether reads return the `EnumItem` is the
-  one behaviour change in #469 (section 17).
-- The hand lists in `classes.rs:11-71` and the enum tables built in `api/input.rs` go away.
+- Writes accept the `EnumItem` or its name (today's scripts keep working). Reads return the `EnumItem`: the one behaviour
+  change in #469 (section 17, question 2, decided yes). `PropDesc::script_value` and `stored_item` are that conversion at the
+  host interface.
+- The hand lists in `classes.rs:11-71` and the enum tables built in `api/input.rs` are gone. `MATERIALS` remains as a name
+  for `Enum.Material`'s items, because `metallic_render` has one table row per material.
 
 **Data types** (#472): `DataTypeDesc { name, fields, constructors, methods, operators }` with typed signatures, for
 `Vector3`, `Vector2`, `CFrame`, `Color3`, `UDim`, `UDim2`, later `TweenInfo` and others. They are value types (copied,
@@ -949,7 +951,7 @@ built in this epic; the design leaves room:
    and update the tests that assert today's texts. Recommended: yes, right after #468.
 2. **Enum reads return `EnumItem` (#469)?** Roblox-compatible, but `print(part.Material)` then prints
    `Enum.Material.Plastic`, and `part.Material == "Plastic"` becomes false. Writes accept both either way.
-   Recommended: yes, as its own PR.
+   Decided: yes, as its own PR (#469). `docs/luau-api.md` "Enums" lists what scripts notice.
 3. **WIT shape:** generic id-based interface plus generated typed classes (Recommended, 13.4), or one WIT resource per
    class as #474's text says?
 4. **`game` as a real `DataModel` instance** with services as its children (`workspace.Parent == game`)? Changes

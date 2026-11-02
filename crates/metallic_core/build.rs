@@ -1,15 +1,16 @@
 //! Class discovery: finds every class file under `src/classes/<group>/` and generates the module
-//! tree plus the `ALL_CLASSES` list that `classes::registry` resolves.
+//! tree plus the `ALL_CLASSES` and `ALL_ENUMS` lists that `classes::registry` resolves.
 //!
-//! A file takes part by having a line starting with `pub static CLASS:`. Other files in a group
-//! folder (helpers) are compiled as plain modules. Only file paths and that marker line are read;
-//! Rust is never parsed beyond that. The folders are for people: inheritance comes only from
+//! A file takes part by having a line starting with `pub static CLASS:` or `pub static ENUMS:`.
+//! Other files in a group folder (helpers) are compiled as plain modules. Only file paths and those
+//! marker lines are read; Rust is never parsed beyond that. The folders are for people: inheritance comes only from
 //! `ClassDesc::superclass`. Adding a class is adding one file.
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::{env, fmt::Write as _, fs};
 
 const CLASS_MARKER: &str = "pub static CLASS:";
+const ENUMS_MARKER: &str = "pub static ENUMS:";
 
 /// One group folder: its Rust modules, and the folders inside it.
 #[derive(Default)]
@@ -39,25 +40,36 @@ fn stem(path: &Path) -> String {
         .into_owned()
 }
 
-fn is_class_file(source: &str) -> bool {
+fn has_marker(source: &str, marker: &str) -> bool {
     source
         .lines()
-        .any(|line| line.trim_start().starts_with(CLASS_MARKER))
+        .any(|line| line.trim_start().starts_with(marker))
+}
+
+/// What the discovered files export, as paths from the generated module.
+#[derive(Default)]
+struct Exports {
+    classes: Vec<String>,
+    enums: Vec<String>,
 }
 
 fn read(path: &Path) -> String {
     fs::read_to_string(path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
 }
 
-fn scan(dir: &Path, module_path: &str, group: &mut Group, classes: &mut Vec<String>) {
+fn scan(dir: &Path, module_path: &str, group: &mut Group, exports: &mut Exports) {
     for path in sorted_entries(dir) {
         let name = stem(&path);
         if path.is_dir() {
             let inner = group.groups.entry(name.clone()).or_default();
-            scan(&path, &format!("{module_path}{name}::"), inner, classes);
+            scan(&path, &format!("{module_path}{name}::"), inner, exports);
         } else if path.extension().is_some_and(|ext| ext == "rs") {
-            if is_class_file(&read(&path)) {
-                classes.push(format!("{module_path}{name}::CLASS"));
+            let source = read(&path);
+            if has_marker(&source, CLASS_MARKER) {
+                exports.classes.push(format!("{module_path}{name}::CLASS"));
+            }
+            if has_marker(&source, ENUMS_MARKER) {
+                exports.enums.push(format!("{module_path}{name}::ENUMS"));
             }
             let absolute = path.to_string_lossy().replace('\\', "/");
             group.files.insert(name, absolute);
@@ -84,17 +96,18 @@ fn main() {
     println!("cargo:rerun-if-changed={}", root.display());
 
     let mut group = Group::default();
-    let mut classes = Vec::new();
+    let mut exports = Exports::default();
     for path in sorted_entries(&root) {
         if path.is_dir() {
             let name = stem(&path);
             let inner = group.groups.entry(name.clone()).or_default();
-            scan(&path, &format!("{name}::"), inner, &mut classes);
+            scan(&path, &format!("{name}::"), inner, &mut exports);
         } else if path.extension().is_some_and(|ext| ext == "rs") {
             // The top level holds the registry itself; a class here would be silently skipped.
+            let source = read(&path);
             assert!(
-                !is_class_file(&read(&path)),
-                "{} declares a class: class files go in a group folder under src/classes/",
+                !has_marker(&source, CLASS_MARKER) && !has_marker(&source, ENUMS_MARKER),
+                "{} declares a class or enums: those go in a group folder under src/classes/",
                 path.display()
             );
         }
@@ -103,8 +116,13 @@ fn main() {
     let mut code = String::new();
     write_modules(&group, &mut code);
     code.push_str("\npub static ALL_CLASSES: &[&crate::classes::ClassDesc] = &[\n");
-    for class in &classes {
+    for class in &exports.classes {
         let _ = writeln!(code, "    &{class},");
+    }
+    code.push_str("];\n");
+    code.push_str("\npub static ALL_ENUMS: &[&[crate::classes::EnumDesc]] = &[\n");
+    for enums in &exports.enums {
+        let _ = writeln!(code, "    {enums},");
     }
     code.push_str("];\n");
     fs::write(out_dir.join("classes_generated.rs"), code).expect("write classes_generated.rs");

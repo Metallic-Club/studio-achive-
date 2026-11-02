@@ -4,11 +4,16 @@
 //! `Scriptable` (or `Fixed`) the script's `CFrame` and `FieldOfView` are the camera.
 use crate::classes::prelude::*;
 
+/// `Custom` is the game's own camera; `Scriptable` and `Fixed` leave the camera to the script's
+/// `CFrame` and `FieldOfView`.
+const CAMERA_TYPE: EnumDesc = EnumDesc::new("CameraType", &["Custom", "Scriptable", "Fixed"]);
+
 pub static CLASS: ClassDesc = ClassDesc::new("Camera", Some("Instance"))
     .flags(ClassFlags::CREATABLE)
     .category("Base")
     .no_insert()
     .describe("The view a client renders the world from.")
+    .enums(&[CAMERA_TYPE])
     // Each client has its own camera: nothing here is sent to a player.
     .props(&[
         PropDesc::new("CFrame", ValueType::CFrame, || {
@@ -19,10 +24,10 @@ pub static CLASS: ClassDesc = ClassDesc::new("Camera", Some("Instance"))
         num("FieldOfView", || Value::Number(70.0), 1.0, 120.0)
             .server_only()
             .describe("How wide the view is, in degrees."),
-        choice(
+        enumerated(
             "CameraType",
             || Value::String("Custom".into()),
-            CAMERA_TYPES,
+            &CAMERA_TYPE,
         )
         .server_only()
         .describe(

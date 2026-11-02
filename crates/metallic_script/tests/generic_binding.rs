@@ -188,8 +188,8 @@ const CLASS_LITERALS_LEFT: &[(&str, usize, &str)] = &[
     ("Players", 3, "#463, #464"),
     // `CurrentCamera` read and write: computed like the others (#464).
     ("Workspace", 2, "#464"),
-    // `ViewportSize` read and write, `CameraType`: computed like the others (#464).
-    ("Camera", 3, "#464"),
+    // `ViewportSize` read and write: computed like the others (#464).
+    ("Camera", 2, "#464"),
     // Events: #463.
     ("Humanoid", 1, "#463"),
     ("Player", 1, "#463"),

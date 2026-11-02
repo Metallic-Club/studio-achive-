@@ -9,8 +9,8 @@ use mlua::{
 };
 
 use super::datatypes::{LuaVector3, vector};
+use super::enums::enum_item;
 use super::errors;
-use super::input::enum_item;
 use super::lua_error;
 
 /// Luau `CFrame`.

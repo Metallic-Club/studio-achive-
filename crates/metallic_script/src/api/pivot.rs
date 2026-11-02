@@ -7,7 +7,7 @@ use mlua::{Function, Lua, UserDataRef, Value};
 
 use super::cframe::{LuaCFrame, cframe};
 use super::datatypes::LuaVector3;
-use super::input::enum_item;
+use super::enums::enum_item;
 use super::instance::LuaInstance;
 use super::lua_error;
 

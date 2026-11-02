@@ -22,6 +22,7 @@ use mlua::{
 
 use super::cframe::{LuaCFrame, cframe};
 use super::datatypes::lua_to_value;
+use super::enums::enum_write;
 use super::errors;
 use super::host_api::{LuauHost, method_function};
 use super::signals::{EventKind, LuaSignal};
@@ -409,15 +410,6 @@ fn index_member(lua: &Lua, this: &LuaInstance, key: &str) -> mlua::Result<Value>
                 lua.create_userdata(super::datatypes::LuaVector2([w, h]))?,
             ));
         }
-        // An enum in scripts (`camera.CameraType == Enum.CameraType.Scriptable`); the property
-        // itself is stored as its name.
-        "CameraType" if class == "Camera" => {
-            let name = match state.world()?.get_ref(this.id, "CameraType") {
-                Ok(CoreValue::String(s)) => s.clone(),
-                _ => "Custom".to_string(),
-            };
-            return Ok(state.enum_value("CameraType", &name));
-        }
         "LocalPlayer" if class == "Players" => {
             let player = match state.context {
                 crate::vm::Context::Client => state.shared.local_player.get(),
@@ -544,7 +536,10 @@ fn set_member(
     let host_error = |e| this.host_error(e, None);
     match member.kind {
         MemberKind::Property { desc, .. } => {
-            let mut converted = lua_to_value(value, desc.ty, key)?;
+            let mut converted = match desc.enum_type {
+                Some(enum_desc) => enum_write(value, enum_desc, key)?,
+                None => lua_to_value(value, desc.ty, key)?,
+            };
             // Like Roblox, a part's Size is clamped to 0.001..=2048 studs per axis.
             if key == "Size"
                 && let CoreValue::Vector3(size) = converted

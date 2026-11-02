@@ -843,8 +843,8 @@ local d = Instance.new("DragDetector"); d.DragStyle = Enum.DragDetectorDragStyle
 part:AddTag("Brush:Rocks"); for _, p in CollectionService:GetTagged("Brush:Rocks") do end
 ```
 
-- `Material` is a string in `metallic_core` today; Luau accepts `Enum.Material.X` and the string, and returns the
-  enum, as Roblox does. #78 or #80 owns that conversion.
+- `Material` is a string in `metallic_core`; Luau accepts `Enum.Material.X` and the string, and returns the enum, as
+  Roblox does (#469).
 - `BasePart:Resize` returns false and changes nothing when the result would overlap a part with `CanCollide` (Roblox
   behaviour, R2.11, to verify against the reference while implementing).
 - `GetEffectiveLook` is new; Roblox has no per-part style.

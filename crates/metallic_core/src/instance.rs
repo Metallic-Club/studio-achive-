@@ -753,8 +753,8 @@ impl World {
         if let (Some(allowed), Value::String(s)) = (def.allowed, &value)
             && !allowed.contains(&s.as_str())
         {
-            // A display name (`"Retro / PS1"`) is stored as its id.
-            match def.normalize.and_then(|f| f(s)) {
+            // A display name (`"Retro / PS1"`) or an old enum item name is stored as its id.
+            match def.stored_form(s) {
                 Some(stored) => value = Value::String(stored.to_string()),
                 None => {
                     return Err(CoreError::InvalidValue {

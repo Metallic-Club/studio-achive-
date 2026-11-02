@@ -221,7 +221,8 @@ impl HostApi for LuauHost<'_> {
         let value = world
             .get_ref(h, desc.name)
             .map_err(|error| ApiError::from(error).within(own.name(), desc.name))?;
-        Ok(ScriptValue::from(value))
+        // An enum property's stored name crosses as its item, in every language.
+        Ok(desc.script_value(value))
     }
 
     #[inline]
@@ -245,11 +246,17 @@ impl HostApi for LuauHost<'_> {
         if desc.readonly {
             return Err(ApiError::new(own.name(), desc.name, ApiErrorKind::ReadOnly));
         }
-        let value = v.into_value(desc.ty).ok_or_else(|| {
+        let value = match v {
+            ScriptValue::EnumItem(item) => desc.stored_item(item),
+            other => other.into_value(desc.ty),
+        };
+        let value = value.ok_or_else(|| {
+            let expected = desc
+                .enum_type
+                .map_or_else(|| desc.ty.name().to_owned(), |e| format!("Enum.{}", e.name));
             ApiError::message(format!(
-                "invalid value for property {}: expected {}",
-                desc.name,
-                desc.ty.name()
+                "invalid value for property {}: expected {expected}",
+                desc.name
             ))
         })?;
         world

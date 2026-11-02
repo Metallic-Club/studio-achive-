@@ -6,7 +6,9 @@
 //! `overrides()`; `defaults` and `hide` change an inherited member without redeclaring it.
 //! A malformed set of classes gives a typed [`SchemaError`], never a panic.
 use super::desc::{CallbackDesc, SignalDesc};
-use super::desc::{ClassDesc, ClassFlags, InsertEntry, MemberContext, MethodDesc, PropDesc};
+use super::desc::{
+    ClassDesc, ClassFlags, EnumDesc, InsertEntry, MemberContext, MethodDesc, PropDesc,
+};
 use crate::value::Value;
 use std::collections::HashSet;
 
@@ -30,6 +32,10 @@ pub struct PropertyIndex(pub u16);
 /// cache one function object per declaration. An override has its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct DeclId(pub u32);
+
+/// An enum's position in the registry: enums sorted by name. Never persist one, like [`ClassId`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct EnumId(pub u16);
 
 /// What a member is, with its effective descriptor.
 #[derive(Clone, Copy)]
@@ -189,11 +195,38 @@ impl ResolvedClass {
     }
 }
 
-/// Every class, resolved. Immutable once built.
+/// One enum, with a lookup table of its item names and aliases.
+pub struct ResolvedEnum {
+    /// Its id.
+    pub id: EnumId,
+    /// Its descriptor.
+    pub desc: &'static EnumDesc,
+    /// The class that declares it; `None` for an enum under `classes/enums/`.
+    pub owner: Option<&'static str>,
+    by_name: NameTable<u16>,
+}
+
+impl ResolvedEnum {
+    /// The enum's name.
+    #[inline]
+    pub fn name(&self) -> &'static str {
+        self.desc.name
+    }
+
+    /// The index in [`EnumDesc::items`] of the item with this name or alias. Allocates nothing.
+    #[inline]
+    pub fn item_index(&self, name: &str) -> Option<u16> {
+        self.by_name.get(name)
+    }
+}
+
+/// Every class and enum, resolved. Immutable once built.
 pub struct Registry {
     classes: Vec<ResolvedClass>,
     descs: Vec<&'static ClassDesc>,
     by_name: NameTable<ClassId>,
+    enums: Vec<ResolvedEnum>,
+    enums_by_name: NameTable<EnumId>,
 }
 
 impl std::fmt::Debug for Registry {
@@ -211,7 +244,20 @@ impl Registry {
             classes: Vec::new(),
             descs: Vec::new(),
             by_name: NameTable::new(Vec::new()),
+            enums: Vec::new(),
+            enums_by_name: NameTable::new(Vec::new()),
         }
+    }
+
+    /// Every enum, in [`EnumId`] order.
+    pub fn enums(&self) -> &[ResolvedEnum] {
+        &self.enums
+    }
+
+    /// The enum with this name. Allocates nothing.
+    #[inline]
+    pub fn enum_by_name(&self, name: &str) -> Option<&ResolvedEnum> {
+        self.enums.get(usize::from(self.enums_by_name.get(name)?.0))
     }
 
     /// Every class, in [`ClassId`] order.
@@ -390,6 +436,52 @@ pub enum SchemaError {
         /// The property.
         property: &'static str,
     },
+    /// More enums than a `u16` id can address.
+    #[error("the registry has more than 65,536 enums")]
+    EnumIdOverflow,
+    /// Two enums have the same name.
+    #[error("enum {0} is declared twice")]
+    DuplicateEnum(&'static str),
+    /// An enum has no items, or more than a `u16` index can address.
+    #[error("enum {0} must have between 1 and 65,536 items")]
+    EnumItemCount(&'static str),
+    /// An item name or alias appears twice in one enum.
+    #[error("enum {enum_name} declares {item} twice")]
+    DuplicateEnumItem {
+        /// The enum.
+        enum_name: &'static str,
+        /// The repeated name.
+        item: &'static str,
+    },
+    /// `numbers` does not have one distinct value per item.
+    #[error("enum {0} must give each item its own number")]
+    BadEnumNumbers(&'static str),
+    /// An alias stands for something that is not an item.
+    #[error("enum {enum_name} has alias {alias} for an item it does not have")]
+    AliasWithoutItem {
+        /// The enum.
+        enum_name: &'static str,
+        /// The alias.
+        alias: &'static str,
+    },
+    /// A property's enum is not in the registry, or differs from the one that is.
+    #[error("property {class}.{property} uses enum {enum_name}, which is not declared")]
+    UndeclaredEnum {
+        /// The class.
+        class: &'static str,
+        /// The property.
+        property: &'static str,
+        /// The enum.
+        enum_name: &'static str,
+    },
+    /// An enum property's default is not an item name.
+    #[error("property {class}.{property} defaults to something that is not an item of its enum")]
+    EnumDefaultNotAnItem {
+        /// The class.
+        class: &'static str,
+        /// The property.
+        property: &'static str,
+    },
 }
 
 /// Resolves a set of classes: sorts them by name, checks every rule, flattens every class.
@@ -397,6 +489,14 @@ pub enum SchemaError {
 /// Discovery hands the built-in classes to this once ([`registry`](super::registry)). It is
 /// public so a test can resolve a fixture set, and for creator-defined classes later.
 pub fn resolve(descs: &[&'static ClassDesc]) -> Result<Registry, SchemaError> {
+    resolve_with_enums(descs, &[])
+}
+
+/// Like [`resolve`], with the enums no class owns: the `pub static ENUMS` lists `build.rs` finds.
+pub fn resolve_with_enums(
+    descs: &[&'static ClassDesc],
+    shared_enums: &[&'static [EnumDesc]],
+) -> Result<Registry, SchemaError> {
     let mut sorted = descs.to_vec();
     sorted.sort_by_key(|class| class.name);
     if sorted.len() > usize::from(u16::MAX) + 1 {
@@ -435,11 +535,115 @@ pub fn resolve(descs: &[&'static ClassDesc]) -> Result<Registry, SchemaError> {
         let class = resolve_class(sorted[index], chain, parent, decl_starts[index], &sorted)?;
         resolved[index] = Some(class);
     }
-    Ok(Registry {
+    let enums = resolve_enums(&sorted, shared_enums)?;
+    let enums_by_name = NameTable::new(enums.iter().map(|e| (e.name(), e.id)).collect());
+    let registry = Registry {
         classes: resolved.into_iter().flatten().collect(),
         descs: sorted,
         by_name,
-    })
+        enums,
+        enums_by_name,
+    };
+    check_enum_properties(&registry)?;
+    Ok(registry)
+}
+
+/// Every enum, sorted by name, with its own rules checked.
+fn resolve_enums(
+    classes: &[&'static ClassDesc],
+    shared: &[&'static [EnumDesc]],
+) -> Result<Vec<ResolvedEnum>, SchemaError> {
+    let owned = classes
+        .iter()
+        .flat_map(|class| class.enums.iter().map(|desc| (desc, Some(class.name))));
+    let unowned = shared
+        .iter()
+        .flat_map(|list| list.iter().map(|desc| (desc, None)));
+    let mut all: Vec<(&'static EnumDesc, Option<&'static str>)> = owned.chain(unowned).collect();
+    all.sort_by_key(|(desc, _)| desc.name);
+    if all.len() > usize::from(u16::MAX) + 1 {
+        return Err(SchemaError::EnumIdOverflow);
+    }
+    let mut enums = Vec::with_capacity(all.len());
+    let mut previous = None;
+    for (index, (desc, owner)) in all.into_iter().enumerate() {
+        if previous == Some(desc.name) {
+            return Err(SchemaError::DuplicateEnum(desc.name));
+        }
+        previous = Some(desc.name);
+        enums.push(ResolvedEnum {
+            id: EnumId(index as u16),
+            desc,
+            owner,
+            by_name: enum_name_table(desc)?,
+        });
+    }
+    Ok(enums)
+}
+
+/// The name and alias table of one enum. Every name must be unique across it.
+fn enum_name_table(desc: &'static EnumDesc) -> Result<NameTable<u16>, SchemaError> {
+    let count = desc.items.len();
+    if count == 0 || count > usize::from(u16::MAX) + 1 {
+        return Err(SchemaError::EnumItemCount(desc.name));
+    }
+    if let Some(numbers) = desc.numbers {
+        let distinct = numbers.iter().collect::<HashSet<_>>().len();
+        if numbers.len() != count || distinct != count {
+            return Err(SchemaError::BadEnumNumbers(desc.name));
+        }
+    }
+    let mut seen = HashSet::with_capacity(count + desc.aliases.len());
+    let mut entries = Vec::with_capacity(count + desc.aliases.len());
+    let duplicate = |item| SchemaError::DuplicateEnumItem {
+        enum_name: desc.name,
+        item,
+    };
+    for (index, item) in desc.items.iter().enumerate() {
+        if !seen.insert(*item) {
+            return Err(duplicate(item));
+        }
+        entries.push((*item, index as u16));
+    }
+    for (alias, item) in desc.aliases {
+        if !seen.insert(*alias) {
+            return Err(duplicate(alias));
+        }
+        let Some(index) = desc.items.iter().position(|name| name == item) else {
+            return Err(SchemaError::AliasWithoutItem {
+                enum_name: desc.name,
+                alias,
+            });
+        };
+        entries.push((*alias, index as u16));
+    }
+    Ok(NameTable::new(entries))
+}
+
+/// Every enum property's enum is in the registry and its default is an item.
+fn check_enum_properties(registry: &Registry) -> Result<(), SchemaError> {
+    for class in registry.classes() {
+        for (prop, default) in class.props.iter().zip(&class.defaults) {
+            let Some(desc) = prop.enum_type else {
+                continue;
+            };
+            let declared = registry.enum_by_name(desc.name);
+            if declared.is_none_or(|e| e.desc != desc) {
+                return Err(SchemaError::UndeclaredEnum {
+                    class: class.name(),
+                    property: prop.name,
+                    enum_name: desc.name,
+                });
+            }
+            if !matches!(default, Value::String(s) if desc.items.contains(&s.as_str())) {
+                return Err(SchemaError::EnumDefaultNotAnItem {
+                    class: class.name(),
+                    property: prop.name,
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 fn check_flags(class: &ClassDesc) -> Result<(), SchemaError> {

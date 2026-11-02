@@ -11,6 +11,7 @@ mod bridge;
 mod camera;
 mod cframe;
 mod datatypes;
+mod enums;
 mod errors;
 mod gui;
 mod host_api;
@@ -104,7 +105,7 @@ pub(crate) struct ApiState {
     /// The functions a `FunctionRef` names.
     pub(crate) functions: script_value::ScriptFunctions,
     /// `Enum` and its items.
-    enums: input::Enums,
+    enums: enums::Enums,
     /// Actions bound with `ContextActionService:BindAction`, by name.
     bound: RefCell<HashMap<String, input::Bound>>,
     /// `Cancel` calls for actions unbound while pressed.
@@ -246,7 +247,7 @@ fn build(
     let bridge = bridge::Bridge::new(classes.registry, bodies)?;
     let binding = host_api::Binding::new(lua, classes)?;
 
-    let enums = input::Enums::install(lua)?;
+    let enums = enums::Enums::install(lua)?;
     let bind_wrapper = input::bind_wrapper(lua, &enums)?;
     let (world_cursor, tag_cursor) = {
         let w = world.borrow();

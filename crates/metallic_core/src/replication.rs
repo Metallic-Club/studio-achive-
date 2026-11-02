@@ -6,8 +6,8 @@
 //! This is the play-client policy, not the separately authorized edit-session snapshot policy.
 
 use crate::classes::{
-    self, Member, MemberContext, MemberKind, MethodImpl, Param, PropAccess, PropDef, Registry,
-    Repl, Ty,
+    self, EnumDesc, Member, MemberContext, MemberKind, MethodImpl, Param, PropAccess, PropDef,
+    Registry, Repl, Ty,
 };
 use crate::{InstanceId, Value, World};
 use sha2::{Digest, Sha256};
@@ -16,7 +16,8 @@ use std::sync::LazyLock;
 pub use crate::classes::SchemaError;
 
 /// Fingerprint of class order, inheritance, flags, every member in id order with its signature and
-/// context, effective property defaults and replication/hidden metadata. Includes declared
+/// context, effective property defaults and replication/hidden metadata, and every enum in id order
+/// with its items, numbers and aliases. Includes declared
 /// string-normalization contract ids, numeric clamp/wrap ranges, and boxed CFrames by their 12
 /// row-major components, never their allocation address. Descriptions, categories and function
 /// addresses are not hashed. All lengths and numeric bits use little endian.
@@ -171,7 +172,7 @@ fn hash_property(hash: &mut Sha256, property: &PropDef, default: &Value) {
         PropAccess::Stored => 0,
     }]);
     hash.update([u8::from(property.saved)]);
-    optional_field(hash, property.enum_type);
+    optional_field(hash, property.enum_type.map(|desc| desc.name));
     optional_field(hash, property.deprecated);
     hash_value(hash, default);
 }
@@ -224,6 +225,21 @@ fn hash_member(hash: &mut Sha256, member: &Member, owner: &str, defaults: &[Valu
     }
 }
 
+/// Who declares an enum and its description are not hashed: moving it changes no peer.
+fn hash_enum(hash: &mut Sha256, desc: &EnumDesc) {
+    field(hash, desc.name.as_bytes());
+    hash.update((desc.items.len() as u64).to_le_bytes());
+    for (index, item) in desc.items.iter().enumerate() {
+        field(hash, item.as_bytes());
+        hash.update(desc.value_at(index).to_le_bytes());
+    }
+    hash.update((desc.aliases.len() as u64).to_le_bytes());
+    for (alias, item) in desc.aliases {
+        field(hash, alias.as_bytes());
+        field(hash, item.as_bytes());
+    }
+}
+
 fn hash_registry(registry: &Registry) -> [u8; 32] {
     let mut hash = Sha256::new();
     hash.update(b"metallic-registry-v5\0");
@@ -239,6 +255,10 @@ fn hash_registry(registry: &Registry) -> [u8; 32] {
             let owner = registry.resolved(member.owner).name();
             hash_member(&mut hash, member, owner, &class.defaults);
         }
+    }
+    hash.update((registry.enums().len() as u64).to_le_bytes());
+    for resolved in registry.enums() {
+        hash_enum(&mut hash, resolved.desc);
     }
     hash.finalize().into()
 }
@@ -380,9 +400,9 @@ mod tests {
         assert_eq!(
             original,
             [
-                0xda, 0xba, 0x89, 0x63, 0x6d, 0xc2, 0xbb, 0xdc, 0xd9, 0x2e, 0x9b, 0x39, 0x18, 0x79,
-                0x5d, 0xeb, 0xd3, 0xc7, 0x01, 0x4e, 0x36, 0x5a, 0x9a, 0x42, 0x1d, 0x3a, 0xc7, 0xf1,
-                0x5a, 0x9c, 0x3c, 0xb4
+                0xcc, 0xc9, 0x95, 0x37, 0x29, 0x42, 0x9e, 0x63, 0xa5, 0xdc, 0x71, 0xf0, 0x11, 0x56,
+                0x82, 0xea, 0x83, 0x8c, 0xa0, 0x8e, 0xa6, 0x33, 0x4d, 0x36, 0x56, 0x34, 0x9d, 0xcc,
+                0xc4, 0xff, 0x69, 0x52
             ]
         );
         let mut changed = prop();
@@ -410,6 +430,38 @@ mod tests {
         let mut changed = base(prop());
         changed.name = "Changed";
         assert_ne!(original, ok_hash(&[changed]));
+    }
+
+    #[test]
+    fn fingerprint_covers_enums_but_not_their_owner_or_description() {
+        use crate::classes::EnumDesc;
+        fn hash(list: &'static [EnumDesc]) -> [u8; 32] {
+            let shared: &'static [EnumDesc] = list;
+            hash_registry(&classes::resolve_with_enums(&[], &[shared]).unwrap())
+        }
+        static PLAIN: [EnumDesc; 1] = [EnumDesc::new("E", &["A", "B"])];
+        let plain = hash(&PLAIN);
+
+        static RENAMED: [EnumDesc; 1] = [EnumDesc::new("F", &["A", "B"])];
+        static ITEM: [EnumDesc; 1] = [EnumDesc::new("E", &["A", "C"])];
+        static ORDER: [EnumDesc; 1] = [EnumDesc::new("E", &["B", "A"])];
+        static NUMBERS: [EnumDesc; 1] = [EnumDesc::new("E", &["A", "B"]).numbers(&[5, 6])];
+        static ALIAS: [EnumDesc; 1] = [EnumDesc::new("E", &["A", "B"]).aliases(&[("Old", "A")])];
+        for changed in [&RENAMED, &ITEM, &ORDER, &NUMBERS, &ALIAS] {
+            assert_ne!(plain, hash(changed), "{changed:?}");
+        }
+
+        // The default numbers written out are the same enum.
+        static SAME_NUMBERS: [EnumDesc; 1] = [EnumDesc::new("E", &["A", "B"]).numbers(&[0, 1])];
+        assert_eq!(plain, hash(&SAME_NUMBERS));
+        static DESCRIBED: [EnumDesc; 1] = [EnumDesc::new("E", &["A", "B"]).describe("Text.")];
+        assert_eq!(plain, hash(&DESCRIBED));
+        static OWNER: ClassDef = ClassDef::new("Owner", None).enums(&PLAIN);
+        static NO_ENUM: ClassDef = ClassDef::new("Owner", None);
+        assert_eq!(
+            hash_registry(&classes::resolve(&[&OWNER]).unwrap()),
+            hash_registry(&classes::resolve_with_enums(&[&NO_ENUM], &[&PLAIN]).unwrap()),
+        );
     }
 
     #[test]

@@ -2,10 +2,14 @@
 //! (docs/research/2026-10-30-lighting.md section 5). Presets: `crate::lighting`.
 use crate::classes::prelude::*;
 
+/// `Lighting.LightingStyle` values.
+const LIGHTING_STYLE: EnumDesc = EnumDesc::new("LightingStyle", &["Realistic", "Soft"]);
+
 pub static CLASS: ClassDesc = ClassDesc::new("Lighting", Some("Instance"))
     .flags(ClassFlags::SERVICE)
     .category("Services")
     .describe("The sun, ambient light, exposure and fog of the world; holds the effect classes.")
+    .enums(&[LIGHTING_STYLE])
     .props(&[
         PropDesc::new("ClockTime", ValueType::Number, || Value::Number(14.5))
             .wrapped(0.0, 24.0)
@@ -31,10 +35,10 @@ pub static CLASS: ClassDesc = ClassDesc::new("Lighting", Some("Instance"))
             .describe("Whether the sun and moon cast shadows."),
         num("ShadowSoftness", || Value::Number(0.2), 0.0, 1.0)
             .describe("How soft shadow edges are: 0 is sharp."),
-        choice(
+        enumerated(
             "LightingStyle",
             || Value::String("Realistic".into()),
-            LIGHTING_STYLES,
+            &LIGHTING_STYLE,
         )
         .describe("The overall character of the light: Realistic or Soft."),
         color("FogColor", || {

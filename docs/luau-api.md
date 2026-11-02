@@ -162,10 +162,57 @@ Tags are text labels on instances (Roblox's `CollectionService`). `game:GetServi
   (`tag_cursor`, `tag_changes_since`) the script VMs follow. Tagged-subtree bookkeeping on reparent and destroy only runs
   while some tag exists in the world.
 
+## Enums
+`Enum.<Name>.<Item>` is built from the class registry; `docs/design/class-system.md` section 9 has the design and
+ARCHITECTURE.md "How to add a class" has how to declare one.
+
+An `EnumItem` has `Name` (string), `Value` (number: the item's position from 0 unless the enum gives numbers, as
+`Enum.ContextActionPriority` does) and `EnumType` (its enum, so `Enum.Material.Metal.EnumType == Enum.Material`).
+`typeof(item)` is `"EnumItem"`; it prints as `Enum.Material.Metal`. Items and enums are read-only and a wrong member errors
+(`Nope is not a valid member of Enum.Material`). `Enum.Material` itself is a read-only table: `tostring` gives `Material`,
+`typeof` gives `"table"`, and `pairs` lists its items and any old names.
+
+Enum properties read as an `EnumItem` and take the item or its name:
+
+| Class | Property | Enum |
+|---|---|---|
+| `BasePart` | `Material`, `Shape` | `Enum.Material`, `Enum.PartType` |
+| `Camera` | `CameraType` | `Enum.CameraType` |
+| `InputAction` | `Type`, `Trigger`, `Role`, `TouchSlot`, `TouchLayout` | `Enum.InputActionType`, `Enum.InputTrigger`, `Enum.InputRole`, `Enum.TouchSlot`, `Enum.TouchLayout` |
+| `Lighting` | `LightingStyle` | `Enum.LightingStyle` |
+| `ColorGradingEffect` | `TonemapperPreset` | `Enum.TonemapperPreset` |
+
+```lua
+part.Material = Enum.Material.Metal
+part.Material = "Metal"                  -- the same; scene files store this name
+print(part.Material == Enum.Material.Metal)  --> true
+print(part.Material.Name)                --> Metal
+print(part.Material)                     --> Enum.Material.Metal
+```
+
+A name that is no item, or an item of another enum, is an error and changes nothing:
+``invalid value for `Material`: `Lava` is not one of [...]``, `invalid value for property Material: expected Enum.Material,
+got Enum.PartType.Ball`.
+
+Since #469 these properties read as an item, not a string. A script that held a string changes like this:
+
+| The script does | Before | Now | Write instead |
+|---|---|---|---|
+| `part.Material == "Metal"` | `true` | `false`, with no error (Luau never calls `__eq` across types; Roblox behaves the same) | `part.Material == Enum.Material.Metal` or `part.Material.Name == "Metal"` |
+| `print(part.Material)`, `tostring(part.Material)` | `Metal` | `Enum.Material.Metal` | `part.Material.Name` |
+| `"x" .. part.Material`, `string.lower(part.Material)` | works | error | `part.Material.Name` |
+| `other.Name = part.Material`, any String property or argument | works | error | `part.Material.Name` |
+| `other.Material = part.Material`, a remote argument | works | works: a remote carries the item | |
+| `part:SetAttribute("M", part.Material)` | stores the name | error: attributes hold no enum item | `part.Material.Name` |
+| `t[part.Material]` | key `"Metal"` | key is the item | `t[part.Material.Name]` |
+
+`InputBinding.KeyCode` and the other binding fields are not enum properties: they name runtime controls (`"None"` is not an
+`Enum.KeyCode` item), read as strings and still take `Enum.KeyCode.X` when written. `LookOverride` also stays a string.
+
 ## Camera
 `workspace.CurrentCamera` is a `Camera` instance under the Workspace (nil in a bare script host; `Game` creates it when it
 starts). Properties: `CFrame`, `FieldOfView` (vertical, degrees, 1 to 120, default 70), `CameraType`
-(`Enum.CameraType.Custom`, `Scriptable` or `Fixed`; a string name is accepted when writing) and `ViewportSize` (a read-only
+(`Enum.CameraType.Custom`, `Scriptable` or `Fixed`; see [Enums](#enums)) and `ViewportSize` (a read-only
 `Vector2`, the size of the viewport the game is drawn in; 1280 x 720 until the host reports one).
 
 - **Custom** (the default): the game's third-person camera. Every frame it publishes its pose to `CFrame` and `FieldOfView`, so
@@ -385,14 +432,13 @@ state; M2 replication will separate them. Accepted for M1.
 ## Input (client only)
 Spec: `docs/design/input-actions.md` section 5. Everything here needs the client VM (a `LocalScript`).
 
-### Enums
-`Enum.KeyCode` (`Unknown`, letters, digits, `F1` to `F12`, `Space`, arrows, `MouseButton1`, `ButtonA`, `Thumbstick1`, ...: the
+### Input enums
+See [Enums](#enums). `Enum.KeyCode` (`Unknown`, letters, digits, `F1` to `F12`, `Space`, arrows, `MouseButton1`, `ButtonA`, `Thumbstick1`, ...: the
 controls of the input runtime), `Enum.UserInputType` (`MouseButton1` to `3`, `MouseWheel`, `MouseMovement`, `Touch`, `Keyboard`,
 `Focus`, `Gamepad1` to `4`, `TextInput`, `None`), `Enum.UserInputState` (`Begin`, `Change`, `End`, `Cancel`, `None`),
 `Enum.InputActionType`, `Enum.InputTrigger`, `Enum.TouchSlot` (Metallic), `Enum.ContextActionResult` (`Sink`, `Pass`),
 `Enum.PreferredInput` (`KeyboardAndMouse`, `Gamepad`, `Touch`), `Enum.RotationOrder` (`XYZ`, `XZY`, `YZX`, `YXZ`, `ZXY`, `ZYX`; used by `CFrame`), `Enum.NormalId` (used by `Resize`), `Enum.ContextActionPriority` (`Low` 1000, `Medium` 2000,
-`High` 3000). Items have `Name` and `Value`, compare with `==` and print as `Enum.KeyCode.Space`. A wrong member errors
-(`Nope is not a valid member of Enum.KeyCode`). Raw `UserInputService` events (#80) will reuse these names.
+`High` 3000). Raw `UserInputService` events (#80) will reuse these names.
 
 ### InputAction
 `GetState()` (boolean, number, `Vector2` or `Vector3` by the action's `Type`; zero or false when the action or its context is
