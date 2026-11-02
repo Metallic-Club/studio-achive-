@@ -344,10 +344,12 @@ call: v1 creates Parts and WedgeParts only (no mesh).
 
 ### 8.1 Smart duplicate
 
-Ctrl+D duplicates in place and selects the copy (plan's `duplicate_offsets_and_selects_copy`). If the user moves the
-copy and presses Ctrl+D again within the same selection, the next copy repeats the same offset and rotation
-(Illustrator's "Transform again" and SketchUp's array copy, R4.10). Any other edit or selection change resets it.
-The hint system teaches it after the second manual duplicate-and-move (section 14.1).
+Ctrl+D duplicates and selects the copy, on top of the original (plan's `duplicate_offsets_and_selects_copy`). If the
+user moves the copy and presses Ctrl+D again within the same selection, the next copy repeats the same offset and
+rotation (Illustrator's "Transform again" and SketchUp's array copy, R4.10), and further presses keep repeating it.
+Any other edit or selection change resets it, and so does undoing the move. Each press is one undo step. An Alt+drag
+"Duplicate and move" does not start a chain (assistant's call, overturn it if the habit asks for it). The hint system
+teaches it after the second manual duplicate-and-move (section 14.1).
 
 ### 8.2 Array popover (Ctrl+Shift+D)
 
@@ -359,8 +361,9 @@ The hint system teaches it after the second manual duplicate-and-move (section 1
 | Along path | Path (pick parts in order, or click points), Spacing or Count, Align to path (on), Up axis | Spacing = selection length + 0 |
 
 - **Drag to add copies**: in Linear mode a handle (a 10 px ring) sits past the last ghost. Dragging it along the axis
-  adds or removes copies at the current spacing; the wheel over the handle changes the count by one. Redupe and
-  Axiom work this way and users call it more intuitive than dialog arrays (R1.11, R3.2).
+  adds or removes copies at the current spacing; the wheel over the handle changes the count by one and stays with
+  the array until the pointer moves (each notch moves the ring away from it); Ctrl+wheel does the same anywhere in the
+  viewport. Redupe and Axiom work this way and users call it more intuitive than dialog arrays (R1.11, R3.2).
 - Fields accept SketchUp's and Redupe's short forms: `5x` in Count multiplies by the offset; `/7` in Radial's angle
   makes 7 copies evenly around the full circle (R4.10, R1.11).
 - Ghosts preview at 60% opacity silhouettes while fields change. Commit (Enter or "Make 5 copies") is one undo
@@ -398,7 +401,8 @@ Polybrush's prefab scatter and Roblox's Brushtool plugin are the models (R1.7, R
 - Q selects the Select tool; pressing Q again cycles its mode: **Box → Lasso → Paint** (Photoshop's Shift+L cycle,
   adapted). The header shows the mode.
 - Box: drag on empty space. Parts fully inside are selected; hold Alt (after the drag starts) to include touching
-  parts. Shift adds, Ctrl removes (Ctrl-click still toggles one, UI doc).
+  parts. Shift adds, Ctrl removes, as for Lasso and Paint; the modifiers held at release count (Ctrl-click still toggles
+  one, UI doc; Shift-click adds one). A Shift-drag that starts on a part is a precision body drag, not a box.
 - Lasso: freehand polygon; a part is in if its screen-space centre is inside (fast and predictable).
 - Paint select: a 24 px screen circle selects what it passes over.
 - **Select similar** (Shift+G, menu with keys): Same Color (C), Same Material (M), Same Style (L), Same Size (S), Same

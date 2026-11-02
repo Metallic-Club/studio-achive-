@@ -44,6 +44,7 @@ use crate::picking::Hit;
 use crate::snapping::{self, SnapKind};
 use crate::theme;
 use crate::tokens::ui_tokens;
+use crate::tools::select::{ScreenRect, SelectOp};
 use crate::transform::{Aabb, from_d};
 
 /// Pointer travel (points) before a press becomes a drag.
@@ -208,6 +209,8 @@ pub struct Viewport {
     /// Set by the host each frame: a building tool owns left clicks and drags (no selection,
     /// no gizmo).
     pub capture_pointer: bool,
+    /// Set by the host each frame: a building tool owns the wheel (no dolly).
+    pub capture_wheel: bool,
     /// The camera is being flown, panned or orbited this frame.
     navigating: bool,
     finished: Option<FinishedDrag>,
@@ -258,6 +261,7 @@ impl Viewport {
             showing_play: false,
             delta_rect: None,
             capture_pointer: false,
+            capture_wheel: false,
             navigating: false,
             finished: None,
             guard: None,
@@ -935,7 +939,7 @@ impl Viewport {
             self.camera.pan(dx, dy, f64::from(rect.height()));
         } else if alt && primary && self.drag.is_none() && matches!(self.press, Press::Alt { .. }) {
             self.camera.orbit(dx, dy);
-        } else if scroll != 0.0 && response.hovered() {
+        } else if scroll != 0.0 && response.hovered() && !self.capture_wheel {
             let toward = match response.hover_pos() {
                 Some(p) => {
                     let view = self
@@ -1095,7 +1099,7 @@ impl Viewport {
                 {
                     self.press = Press::Box { from: at };
                 } else if released {
-                    self.click(state, mods.command);
+                    self.click(state, mods.command, mods.shift);
                     self.press = Press::None;
                 }
             }
@@ -1107,7 +1111,7 @@ impl Viewport {
                     self.press = Press::None;
                     if self.selected_target(state, part).is_none() {
                         self.hovered_part = Some(part);
-                        self.click(state, false);
+                        self.click(state, false, false);
                     }
                     let (x, y) = local(at);
                     let ray = view.ray(x, y);
@@ -1117,28 +1121,24 @@ impl Viewport {
                         self.drag_frame(&ctx, view, rect, pos, mods, vertex, false, state);
                     }
                 } else if released {
-                    self.click(state, false);
+                    self.click(state, false, mods.shift);
                     self.press = Press::None;
                 }
             }
             Press::Box { from } => {
                 if released {
                     if let Some(p) = pos {
-                        let r = Rect::from_two_pos(from, p);
-                        let inside = state.picks.filter_centres(|c| {
-                            view.project(c).is_some_and(|(x, y)| {
-                                r.contains(rect.min + Vec2::new(x as f32, y as f32))
-                            })
-                        });
-                        if mods.command {
-                            for id in inside {
-                                if !state.selection.contains(id) {
-                                    state.selection.add(id);
-                                }
-                            }
-                        } else {
-                            state.selection.set(inside);
-                        }
+                        let corner = |p: Pos2| {
+                            let (x, y) = local(p);
+                            glam::DVec2::new(x, y)
+                        };
+                        crate::editor_tools::select::finish_box(
+                            state,
+                            view,
+                            ScreenRect::from_corners(corner(from), corner(p)),
+                            mods.alt,
+                            SelectOp::from_modifiers(mods.shift, mods.command),
+                        );
                     }
                     self.press = Press::None;
                 }
@@ -1421,9 +1421,9 @@ impl Viewport {
     }
 
     /// Click selection with Model-first rule.
-    fn click(&mut self, state: &mut EditorState, ctrl: bool) {
+    fn click(&mut self, state: &mut EditorState, ctrl: bool, shift: bool) {
         let Some(part) = self.hovered_part else {
-            if !ctrl {
+            if !ctrl && !shift {
                 state.selection.clear();
             }
             self.last_click = None;
@@ -1436,6 +1436,8 @@ impl Viewport {
         };
         if ctrl {
             state.selection.toggle(target);
+        } else if shift {
+            state.selection.add(target);
         } else {
             state.selection.select_only(target);
         }

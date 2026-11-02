@@ -383,7 +383,7 @@ apps.
   `tools::geom::PartSnapshot`s, and returns a `Plan` (property changes with old and new values, planned copies, optional
   "Array" Model). Inputs must be finite; arrays create at most 10,000 parts. It never writes the world; `editor_tools` turns a plan into one undo step. Notes: `docs/agents/217-218-arrange.md`.
   Editor wiring (#319): `editor_tools/` registers the building tools as actions and keys (Build menu and toolbar:
-  align A, distribute, mirror Ctrl+M / Ctrl+Shift+M, array Ctrl+Shift+D with ghosts, a drag handle and Ctrl+wheel count, scatter brush
+  align A, distribute, mirror Ctrl+M / Ctrl+Shift+M, array Ctrl+Shift+D with ghosts, a drag handle and a count on the wheel over it or Ctrl+wheel, scatter brush
   B, measure Shift+M, select similar Shift+G, lasso/paint select modes on Q). Each op reads
   `tools::geom::snapshot` and commits one `History` step (`editor_tools/commit.rs`); errors go to Output. Overlays
   paint over the viewport (`viewport.capture_pointer` hands the pointer to a modal tool). `editor_colour.rs` opens the

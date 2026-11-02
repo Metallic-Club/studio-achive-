@@ -55,6 +55,7 @@ use crate::play::review::{PlayReview, compare};
 use crate::play::{LocalPlayMode, PlayController, PlayStart};
 use crate::preview::PreviewOverlay;
 use crate::selection::{Selection, is_detached};
+use crate::smart_duplicate::SmartDuplicate;
 use crate::snapping::grid_shift;
 use crate::transform::Aabb;
 use crate::transform::{
@@ -262,6 +263,8 @@ pub struct EditorState {
     pub can_save: bool,
     /// Where Insert puts a new part: the surface under the cursor, updated by the viewport.
     pub insert_point: Vec3,
+    /// The last Ctrl+D, for repeating its motion.
+    pub(crate) smart_duplicate: Option<SmartDuplicate>,
     requests: Vec<UiRequest>,
     note: Option<(String, Instant)>,
     gestures: [bool; Gesture::COUNT],
@@ -316,6 +319,7 @@ impl EditorState {
             play_review: None,
             can_save: true,
             insert_point: Vec3::new(0.0, 0.5, 0.0),
+            smart_duplicate: None,
             requests: Vec::new(),
             note: None,
             gestures: [false; Gesture::COUNT],
@@ -546,15 +550,17 @@ impl EditorState {
         let _ = self.apply(cmd);
     }
 
-    /// Duplicates the selection, placing the copies on top of it, and selects the copies.
+    /// Duplicates the selection and selects the copies. The copies sit on top of it, or, right
+    /// after moving a previous copy, repeat that motion ([`crate::smart_duplicate`]).
     pub fn duplicate_selection(&mut self) {
-        if self.selection.is_empty() {
+        if self.selection.is_empty() || self.repeat_duplicate() {
             return;
         }
+        let sources = self.selection.ids().to_vec();
         let parts = self.selection.parts(&self.world);
         let height = Aabb::of_parts(&self.world, &parts).map_or(0.0, |b| b.size().y);
         let cmd = Command::Duplicate {
-            sources: self.selection.ids().to_vec(),
+            sources: sources.clone(),
             offset: Vec3::new(0.0, height, 0.0),
             copies: Vec::new(),
         };
@@ -563,6 +569,7 @@ impl EditorState {
         {
             let copies = done.created();
             self.selection.set(copies);
+            self.smart_duplicate = SmartDuplicate::arm(self, &sources, false);
         }
     }
 

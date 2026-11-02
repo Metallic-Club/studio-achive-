@@ -201,15 +201,6 @@ impl PickCache {
         out.sort_by(|a, b| a.distance.total_cmp(&b.distance));
     }
 
-    /// Parts whose centre passes `inside` (box selection in screen space).
-    pub fn filter_centres(&self, mut inside: impl FnMut(DVec3) -> bool) -> Vec<InstanceId> {
-        self.entries
-            .iter()
-            .filter(|e| inside(e.transform.position))
-            .map(|e| e.id)
-            .collect()
-    }
-
     /// The cached transform of a part.
     pub fn transform(&self, id: InstanceId) -> Option<PartTransform> {
         self.index.get(&id).map(|&i| self.entries[i].transform)

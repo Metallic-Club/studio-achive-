@@ -1,11 +1,15 @@
 //! Lasso and paint selection over the viewport, and the Select similar popover (spec 10.1).
 //!
-//! Box selection stays with the viewport. In Lasso and Paint mode the trail is collected here;
-//! on release every Workspace part becomes a [`ScreenItem`] (its [`geom::snapshot`] box
-//! projected to the screen), [`lasso_hits`] or [`paint_hits`] picks the hits, and [`combine`]
-//! applies Shift (add) and Ctrl (remove). A click without travel selects the part under the
-//! cursor, or clears. The trail keeps at most [`MAX_TRAIL`] points (a long paint stroke thins
-//! itself), and only parts whose screen box reaches the trail's bounds are hit-tested.
+//! In Lasso and Paint mode the trail is collected here; on release every Workspace part becomes
+//! a [`ScreenItem`] (its [`geom::snapshot`] box projected to the screen), [`lasso_hits`] or
+//! [`paint_hits`] picks the hits, and [`combine`] applies Shift (add) and Ctrl (remove). A click
+//! without travel selects the part under the cursor, or clears. The trail keeps at most
+//! [`MAX_TRAIL`] points (a long paint stroke thins itself), and only parts whose screen box
+//! reaches the trail's bounds are hit-tested.
+//!
+//! The box drag itself stays with the viewport, which owns the press; on release it calls
+//! [`finish_box`], which picks with [`box_hits`] (fully inside, or touching with Alt) over the
+//! same items and combines the same way.
 //!
 //! The Select similar popover's letters (C M L S K N T P) and Esc are keymap rows in
 //! [`crate::keymap::KeyContext::Popover`], so they follow the keymap's text-focus and
@@ -15,12 +19,13 @@ use glam::DVec2;
 use metallic_core::{InstanceId, Value};
 
 use super::{Popover, ViewContext};
+use crate::camera::ViewProjection;
 use crate::editor::EditorState;
 use crate::theme;
 use crate::tools::geom;
 use crate::tools::select::{
     PAINT_BRUSH_DIAMETER_PX, PartTraits, ScreenItem, ScreenRect, SelectMode, SelectOp, SimilarKey,
-    combine, lasso_hits, paint_hits, select_similar,
+    box_hits, combine, lasso_hits, paint_hits, select_similar,
 };
 
 /// Most points a lasso or paint trail keeps.
@@ -73,7 +78,7 @@ pub fn workspace_parts(state: &EditorState) -> Vec<InstanceId> {
 }
 
 /// Screen items for every Workspace part in front of the camera.
-pub fn screen_items(state: &EditorState, cx: &ViewContext<'_>) -> Vec<ScreenItem<InstanceId>> {
+pub fn screen_items(state: &EditorState, view: &ViewProjection) -> Vec<ScreenItem<InstanceId>> {
     let ids = workspace_parts(state);
     geom::snapshot(&state.world, &ids)
         .into_iter()
@@ -81,9 +86,9 @@ pub fn screen_items(state: &EditorState, cx: &ViewContext<'_>) -> Vec<ScreenItem
             let pts: Vec<DVec2> = s
                 .corners()
                 .iter()
-                .map(|c| cx.view.project(*c).map(|(x, y)| DVec2::new(x, y)))
+                .map(|c| view.project(*c).map(|(x, y)| DVec2::new(x, y)))
                 .collect::<Option<Vec<_>>>()?;
-            let (x, y) = cx.view.project(s.position)?;
+            let (x, y) = view.project(s.position)?;
             let rect = pts
                 .iter()
                 .fold(ScreenRect::from_corners(pts[0], pts[0]), |r, p| {
@@ -186,7 +191,7 @@ fn finish(
                 ScreenRect::from_corners(r.min.min(*p), r.max.max(*p))
             }))
         });
-        let mut items = screen_items(state, cx);
+        let mut items = screen_items(state, &cx.view);
         if let Some(b) = bounds {
             let (lo, hi) = (b.min - DVec2::splat(reach), b.max + DVec2::splat(reach));
             items.retain(|i| {
@@ -201,6 +206,20 @@ fn finish(
             _ => paint_hits(&items, &trail),
         }
     };
+    let next = combine(state.selection.ids(), &hits, op);
+    state.selection.set(next);
+}
+
+/// Ends a box drag over `area` (viewport-relative screen points): parts fully inside, or touching
+/// with `touching` (Alt), combined with the selection by `op`.
+pub fn finish_box(
+    state: &mut EditorState,
+    view: &ViewProjection,
+    area: ScreenRect,
+    touching: bool,
+    op: SelectOp,
+) {
+    let hits = box_hits(&screen_items(state, view), area, touching);
     let next = combine(state.selection.ids(), &hits, op);
     state.selection.set(next);
 }
@@ -229,8 +248,7 @@ pub fn part_traits(state: &EditorState) -> Vec<PartTraits<InstanceId>> {
                 material: text(s.id, "Material"),
                 style,
                 size: s.size,
-                // Tags (#78) are not in the engine yet: every part has none.
-                tags: Vec::new(),
+                tags: state.world.tags(s.id).map(str::to_string).collect(),
                 parent: state.world.parent(s.id),
             }
         })

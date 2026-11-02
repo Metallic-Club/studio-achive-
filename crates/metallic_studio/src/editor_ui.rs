@@ -993,6 +993,7 @@ impl EditorUi {
                         .ui(ui, &mut self.actions, &mut self.state, &self.keymap);
                     let before = ui.available_rect_before_wrap();
                     self.viewport.capture_pointer = self.tools.captures_pointer(&self.state);
+                    self.viewport.capture_wheel = self.tools.captures_wheel();
                     // Each gesture owner may edit during its own gesture; the flag is its
                     // state after it ran (see EditorState::gesture_active).
                     self.state.set_gesture(Gesture::Viewport, false);

@@ -114,9 +114,13 @@ pub struct ArrangeSettings {
     pub angle_text: String,
     /// While on, viewport clicks add path points.
     pub picking_points: bool,
-    linear_for: Option<u64>,
+    /// What the linear default offset was taken from: selection revision and last duplicate offset.
+    linear_for: Option<(u64, Option<DVec3>)>,
     handle: Option<HandleDrag>,
     handle_hover: bool,
+    /// Where the wheel last changed the count on the handle. Each notch moves the ring away from
+    /// the pointer, so the wheel stays with the array until the pointer moves.
+    wheel_latch: Option<Pos2>,
     preview: Option<(PreviewKey, Result<Plan, String>)>,
     /// The selection's pivot and size for the drag handle, cached per selection and world.
     handle_basis: Option<(BasisKey, Option<(DVec3, DVec3)>)>,
@@ -167,6 +171,7 @@ impl Default for ArrangeSettings {
             linear_for: None,
             handle: None,
             handle_hover: false,
+            wheel_latch: None,
             preview: None,
             handle_basis: None,
         }
@@ -186,6 +191,7 @@ impl ArrangeSettings {
             self.count_text = h.start_count.to_string();
         }
         self.handle_hover = false;
+        self.wheel_latch = None;
     }
 
     /// The selection's pivot and size (cached until the selection or the world changes).
@@ -213,6 +219,11 @@ impl ArrangeSettings {
     pub fn wants_pointer(&self) -> bool {
         (self.mode == ArrayMode::Path && self.picking_points)
             || (self.mode == ArrayMode::Linear && (self.handle_hover || self.handle.is_some()))
+    }
+
+    /// True when the wheel belongs to the array: the pointer is over the linear drag handle.
+    pub fn wheel_on_handle(&self) -> bool {
+        self.mode == ArrayMode::Linear && (self.handle_hover || self.wheel_latch.is_some())
     }
 
     /// The array the fields describe.
@@ -472,14 +483,17 @@ pub fn array_window(
     s: &mut ArrangeSettings,
     popover: &mut Option<Popover>,
 ) {
-    // A new selection gets the default linear offset: its size on X, side by side.
-    if s.linear_for != Some(state.selection.revision()) {
-        s.linear_for = Some(state.selection.revision());
+    // A new selection, or a copy just moved, gets the default linear offset: the offset Ctrl+D
+    // would repeat, else its size on X, side by side.
+    let last_duplicate = state.last_duplicate_offset();
+    let key = (state.selection.revision(), last_duplicate);
+    if s.linear_for != Some(key) {
+        s.linear_for = Some(key);
         if let Ok(objects) = read_objects(&state.world, state.selection.ids())
             && !objects.is_empty()
         {
             let size = selection_bounds_in(&objects, &DMat3::IDENTITY).size();
-            s.linear.offset = default_linear_offset(None, size, DVec3::X);
+            s.linear.offset = default_linear_offset(last_duplicate, size, DVec3::X);
             s.linear.offset_is = OffsetIs::Distance;
             s.grid.spacing = size.max(DVec3::splat(0.05));
         }
@@ -551,9 +565,10 @@ pub fn array_window(
     }
 }
 
-/// Ctrl+wheel over the viewport while the array preview shows: `notches` (up is +1) change the
-/// count by one each, clamped to the mode's range (linear and path 1, radial 2, up to
-/// [`MAX_COPIES`]). Grid has three counts and ignores the wheel. Returns whether the count changed.
+/// Ctrl+wheel over the viewport, or the wheel over the linear handle, while the array preview
+/// shows: `notches` (up is +1) change the count by one each, clamped to the mode's range (linear
+/// and path 1, radial 2, up to [`MAX_COPIES`]). Grid has three counts and ignores the wheel.
+/// Returns whether the count changed.
 /// Nothing is committed: the preview follows, and "Make N copies" is still the one undo step.
 pub fn wheel_count(s: &mut ArrangeSettings, notches: i32) -> bool {
     if notches == 0 {
@@ -635,9 +650,11 @@ fn linear_fields(ui: &mut egui::Ui, s: &mut ArrangeSettings) {
         );
     });
     ui.label(
-        egui::RichText::new("Drag the ring past the last ghost, or Ctrl+wheel, to add copies")
-            .small()
-            .color(theme::text_3()),
+        egui::RichText::new(
+            "Drag or scroll the ring past the last ghost, or Ctrl+wheel, to add copies",
+        )
+        .small()
+        .color(theme::text_3()),
     );
 }
 
@@ -758,21 +775,32 @@ pub fn array_viewport(
             i.pointer.primary_released(),
         )
     });
-    // Ctrl+wheel changes the count. egui turns Ctrl+wheel into zoom, so the camera does not
-    // dolly at the same time; read the raw wheel events, one notch per event.
+    // Ctrl+wheel anywhere changes the count, and so does the plain wheel over the handle. egui
+    // turns Ctrl+wheel into zoom, and `captures_wheel` keeps the viewport's dolly off the handle
+    // (from the same hover as here), so the camera does not move at the same time; while flying
+    // the wheel stays the camera speed. Read the raw wheel events, one notch per event.
+    s.wheel_latch = s
+        .wheel_latch
+        .filter(|at| cx.pointer.is_some_and(|p| (p - *at).length() <= 3.0));
     if cx.pointer.is_some() {
+        let on_handle = s.wheel_on_handle() && !ui.input(|i| i.pointer.secondary_down());
         let notches: i32 = ui.input(|i| {
             i.events
                 .iter()
                 .filter_map(|e| match e {
                     egui::Event::MouseWheel {
                         delta, modifiers, ..
-                    } if modifiers.command && delta.y != 0.0 => Some(delta.y.signum() as i32),
+                    } if (modifiers.command || on_handle) && delta.y != 0.0 => {
+                        Some(delta.y.signum() as i32)
+                    }
                     _ => None,
                 })
                 .sum()
         });
         if wheel_count(s, notches) {
+            if on_handle {
+                s.wheel_latch = cx.pointer;
+            }
             ui.ctx().request_repaint();
         }
     }
@@ -821,6 +849,7 @@ fn linear_handle(
     pressed: bool,
     down: bool,
 ) {
+    s.handle_hover = false;
     let Some((pivot, size)) = s.basis(state) else {
         return;
     };

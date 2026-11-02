@@ -489,6 +489,12 @@ impl EditorTools {
             || (t.popover == Some(Popover::Array) && t.arrange.wants_pointer())
     }
 
+    /// True when a tool owns the wheel in the viewport this frame (over the array's drag handle).
+    pub fn captures_wheel(&self) -> bool {
+        let t = self.shared.borrow();
+        t.popover == Some(Popover::Array) && t.arrange.wheel_on_handle()
+    }
+
     /// Draws the open popover and the brush header (call once per frame, outside the panels).
     pub fn ui(&mut self, ctx: &egui::Context, state: &mut EditorState) {
         let mut t = self.shared.borrow_mut();
