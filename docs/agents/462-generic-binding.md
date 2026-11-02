@@ -76,7 +76,19 @@ class, bad keys and arguments, the same after `Destroy`, and `Instance.new` of e
 Base and head output are byte-identical, error texts included.
 
 ## Perf
-See "Last check results". The gate counts Callgrind `Ir` on Linux; Valgrind is not available here, so **no `Ir` was measured**.
+The gate counts Callgrind `Ir` on Linux; Valgrind is not available here, so **no `Ir` was measured**: the PR's `Performance` job
+gives the first real numbers. Native numbers below are `elapsed_ns` of `perf_ci_lua`, Windows 11, a working desktop with other
+sessions building, not a controlled machine. Base `c007d15`, head `e9b8ad8`'s code, both `--release`, run alternately, 31 samples.
+
+| Workload | Base min / median | Head min / median | Median change |
+|---|---|---|---|
+| `lua_reads` | 22.440 / 23.813 ms | 20.971 / 21.889 ms | -8.1% |
+| `lua_writes` | 14.929 / 15.300 ms | 15.207 / 15.534 ms | +1.5% |
+| `lua_method_calls` | 35.403 / 36.006 ms | 25.473 / 25.970 ms | -27.9% |
+
+`lua_writes` was the one to watch: +1.5% and +2.4% in two runs of the final code (+4.3% before moving scalars directly in
+`From<Value>` and `into_value`), `lua_reads` -3% to -8% across runs. `__namecall` accounts for the method calls: the same code
+without it was -1.7%. `World` and the core workloads' paths were not touched, so `perf_ci` was not run.
 
 ## Commands
 ```
@@ -101,5 +113,10 @@ target/release/examples/perf_ci_lua lua_method_calls
 ## Open questions
 None blocking.
 
-## Last check results
-Filled in at the end of the work; see the commit that last touched this file.
+## Last check results (code at `e9b8ad8`, on main `78523c4`)
+`cargo test --workspace -j 4 --no-fail-fast`: 2416 passed, 3 failed, 10 ignored. `metallic_render --test shading
+gpu_timing_measures_a_frame_where_supported` fails alone too: the known #436. `metallic_studio --test play
+script_errors_go_to_output_with_the_play_tag` passes alone (load, #497). `metallic_runtime --test camera_api ray_is_a_datatype`
+hit `Script timeout: exhausted allowed execution time` under load (a wall-clock budget, #497); it passed 5 of 5 alone.
+`cargo clippy --workspace --all-targets -j 4 -- -D warnings`: clean. `cargo deny check licenses`: licenses ok. `cargo fmt --all --
+--check` and the class-file rustfmt step: clean. No existing test was edited; the golden `registry_hash` is unchanged.
