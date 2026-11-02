@@ -21,13 +21,11 @@ intended script-visible change), writes take the item or its name, and core keep
   `replication.rs`.
 
 ## Next
-Nothing in this issue beyond review. **For #462 (generic binding):** `api/instance.rs` has two small hunks from this issue: the
-read picks `state.get_enum_property` and the write picks `enum_write` when `def.enum_type` is set. Keep that behaviour:
-`HostApi::get_property` must use `PropDesc::script_value`, and `set_property` must use `PropDesc::stored_item` for
-`ScriptValue::EnumItem` and pass a `ScriptValue::String` through. `From<&Value> for ScriptValue` alone gives a string and would
-silently undo the read change. Convert at the Luau edge with `enums::enum_item_ref` and `ApiState::enum_ref_value`.
-`crates/metallic_script/tests/enums.rs` catches a miss. `Ty::Enum` still refuses a plain string (#461's decision, tested): a
-method that should also take a name declares `.manual()`.
+Nothing in this issue beyond review. Merged with #462 (generic binding): an enum read is `HostApi::get_property` giving
+`ScriptValue::EnumItem` through `PropDesc::script_value`, and `script_to_lua` gives this VM's item object; `set_property` takes an
+item through `PropDesc::stored_item`; `set_member` uses `enums::enum_write` so a Luau write keeps its error texts. `api/instance.rs`
+has that one match and no other enum code, and `crates/metallic_script/tests/enums.rs` fails if a read goes back to a string.
+`Ty::Enum` still refuses a plain string (#461's decision, tested): a method that should also take a name declares `.manual()`.
 
 ## Decisions where the design left room
 - `part.Material == "Metal"` is false with no error: Luau does not call `__eq` across types, and Roblox behaves the same.
@@ -60,6 +58,8 @@ method that should also take a name declares `.manual()`.
 - `crates/metallic_core/src/replication.rs` `fingerprint_covers_property_metadata_defaults_order_and_class_identity`: new pinned
   bytes, because the stream gained the enum count. Recomputed with `printf | sha256sum`: the old stream gives the old bytes, and
   the old stream plus eight zero bytes gives the new ones.
+- `crates/metallic_script/tests/generic_binding.rs` `CLASS_LITERALS_LEFT`: `Camera` 3 to 2, because the `CameraType` arm is gone.
+  That table counts those arms, and the merge with #462 is where the two met.
 
 No test asserted that an enum property reads as a string, and no other test needed an edit.
 
@@ -111,6 +111,24 @@ An enum read is cheaper than the string read was (about 14% to 23%): it clones a
 costs about 5% to 9% more than the string compare did, and that line also looks up `Enum` and `Material`. `.Name` on the result
 is a further userdata field read: `p.Material.Name` measured 1383 and 1368 ns.
 
+### After the merge with #462
+Base `d5d6657` (main), head `0a8f9d2`, same kind of machine and method, with no artificial load running. `Ir` still not measured.
+
+| Workload | Base min / median | Head min / median | Median change |
+|---|---|---|---|
+| `lua_reads` | 20.948 / 22.792 ms | 20.877 / 22.864 ms | +0.3% |
+| `lua_writes` | 15.210 / 16.614 ms, 15.060 / 15.447 ms | 15.012 / 16.467 ms, 14.858 / 15.314 ms | -0.9%, -0.9% |
+| `lua_method_calls` | 25.949 / 27.651 ms | 25.753 / 27.988 ms | +1.2% |
+| `reads` | 2.458 / 2.688 ms | 2.303 / 2.646 ms | -1.6% |
+| `writes` | 1.004 / 1.060 ms | 0.971 / 1.051 ms | -0.9% |
+| `clone` | 1.283 / 1.717 ms | 1.451 / 1.726 ms | +0.6% |
+| `create` | 0.084 / 0.090 ms | 0.085 / 0.091 ms | +0.4% |
+| `destroy` | 0.430 / 0.488 ms | 0.424 / 0.490 ms | +0.4% |
+
+31 samples each, except `lua_writes`: two runs of 61. A first 31-sample run of `lua_writes` gave +4.4% at the median with the
+minimum at -0.3%; the two longer runs did not repeat it. The `lua_*` workloads read no enum property. The enum-read probe in the
+section above was measured before #462 and was not repeated.
+
 ## Commands
 ```
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -122,14 +140,8 @@ find crates/metallic_core/src/classes -mindepth 2 -name '*.rs' -print0 | xargs -
 ## Open questions
 `GetEnumItems` and `typeof(Enum.Material) == "Enum"` are not implemented either.
 
-## Last check results (on base c007d15)
-`cargo test --workspace -j 4 --no-fail-fast`: 2397 passed, 7 failed, 9 ignored. Rerun alone, six passed (load, #497):
-`metallic_runtime --test sim_runner argument_load_and_script_failures_return_nonzero`; `metallic_script --test task_threads`
-`native_wrap_cannot_bypass_ownership_of_an_adopted_thread`, `ordinary_coroutines_preserve_opaque_rust_error_object_identity`,
-`duplicate_admission_is_rejected_and_closed_queued_threads_are_silent`; `metallic_studio --test local_play`
-`combined_output_preserves_server_client_and_error_text_without_false_attribution`; `metallic_studio --test play`
-`script_errors_go_to_output_with_the_play_tag`. The seventh still fails alone and is the known #436: `metallic_render --test
-shading gpu_timing_measures_a_frame_where_supported`. Parkour: `parkour_smoke_scene_passes_headless`,
-`parkour_template_has_the_required_content` and `the_shipped_parkour_template_creates_a_loadable_game` pass.
-`cargo clippy --workspace --all-targets -j 4 -- -D warnings`: clean. `cargo deny check licenses`: licenses ok.
-`cargo fmt --all -- --check` and the class-file rustfmt step: clean.
+## Last check results (merge `0a8f9d2` on main `d5d6657`)
+`cargo test -p metallic_core -p metallic_script -j 4 --no-fail-fast`: 627 passed, 0 failed, 4 ignored.
+`cargo test --workspace -j 4 --no-fail-fast`: 2450 passed, 0 failed, 10 ignored. `cargo clippy --workspace --all-targets -j 4 --
+-D warnings`: clean. `cargo deny check licenses`: licenses ok. `cargo fmt --all -- --check` and the class-file rustfmt step: clean.
+An earlier run overlapped another agent's artificial load (#497), failed on script timeouts and was discarded.
