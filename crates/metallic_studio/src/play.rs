@@ -25,8 +25,13 @@
 //! [`LocalPlayMode`] is Play (#11, F5): a [`LocalPlaySession`] runs the real Game in this
 //! process, client and server combined like the Player, and is its own [`PlayView`].
 //! [`input::PlayInput`] turns the editor's egui input into the game's raw events.
+//!
+//! [`review`] is what Stop offers afterwards: the changes a game with a [`PlayView`] made, which
+//! the creator may keep (#130). It reads the play world through [`PlayView::inspect_world`] just
+//! before the session stops, so a mode without a view has no offer and needs no code for it.
 pub mod input;
 mod local;
+pub mod review;
 
 pub use local::{LocalPlayMode, LocalPlaySession, PLAY_TAG};
 

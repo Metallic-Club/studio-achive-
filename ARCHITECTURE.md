@@ -344,6 +344,20 @@ apps.
   Stop. Play is asked for with `UiRequest::StartPlay`, so open script
   tabs and gestures commit first. Stop (`EditorState::stop_play`) drops the session; a start error goes to Output
   and Studio stays in edit mode.
+  Keeping Play edits (#130): Stop still discards at once, with no prompt. Just before the session stops,
+  `play::review::compare` walks the play world (`PlayView::inspect_world`) and the edit world once and builds
+  `ChangeItem`s, one per Instance: changed (properties, attributes, tags, parent), created (owned copies of the whole
+  subtree) or removed. It costs nothing while the game runs. `deep_clone` keeps ids and ids are never reused, so the
+  same id in both worlds is the same Instance. Left out as runtime churn: everything under Players, each
+  `Player.Character`, Cameras, `Position`/`Orientation` of a part not anchored in both worlds, a Checkpoint's `Color`,
+  a `Ref` emptied by its target going, sibling order; hidden properties make no row but travel with one. A group lists
+  at most `MAX_LISTED` rows and holds `MAX_CREATED_NODES` created Instances; the rest are counted, the UI says so, and
+  they cannot be kept. `EditorState::play_review` holds the `PlayReview` (groups of rows; #229 adds its own group);
+  `play_review.rs` draws it as a non-blocking strip above Output, "Review N changes from Play", opening to a list with
+  a Keep box per row. `EditorState::keep_play_changes` runs the ticked rows as one `Command::Batch` (`Create`,
+  `Reparent`, `SetProperties`, `SetAttribute`, `SetTag`, `Delete`), parents first, deletes last, so one Undo reverts
+  them all. Dismiss, Esc, starting Play and the first edit of the level (`History::revision` moved, Undo included) end
+  the offer. A session without a `PlayView` (Team Test) has no offer. Actions `play.review` and `play.review_dismiss`.
   Building core (#213-#215): `preview.rs` (`PreviewOverlay`: gestures write live values through it, write-through
   to the world so renderer and Properties need no change; commit gives one `Command::SetProperties`, cancel restores),
   `gizmo.rs` (handles for Move/Rotate/Scale/Transform, body drags over surfaces, axis locks, R/T turns, typed values,

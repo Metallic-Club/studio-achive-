@@ -30,6 +30,10 @@
 //! session runs, [`EditorState::apply`], [`EditorState::record`], undo and redo refuse and leave
 //! the edit world, its history and the selection as they were; the session runs on its own copy,
 //! so [`EditorState::stop_play`] returns to exactly the edit state Play started from.
+//!
+//! **Keeping Play edits** (#130). Stop then offers what the game changed
+//! ([`EditorState::play_review`], [`crate::play::review`]); [`EditorState::keep_play_changes`]
+//! applies the rows the creator ticked as one undo step. Nothing else reaches the edit world.
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -47,6 +51,7 @@ use crate::pivot::{
     Pivot, PivotWrite, Rigid, has_custom_pivot, models_with_set_pivots, pivot_writes, reset_writes,
     to_cframe, world_pivot,
 };
+use crate::play::review::{PlayReview, compare};
 use crate::play::{LocalPlayMode, PlayController, PlayStart};
 use crate::preview::PreviewOverlay;
 use crate::selection::{Selection, is_detached};
@@ -251,6 +256,8 @@ pub struct EditorState {
     pub output: OutputSink,
     /// Play modes (Play is registered) and the running session.
     pub play: PlayController,
+    /// The offer after Stop: what Play changed (#130).
+    play_review: Option<PlayReview>,
     /// When false, nothing is written to disk (screenshot mode).
     pub can_save: bool,
     /// Where Insert puts a new part: the surface under the cursor, updated by the viewport.
@@ -306,6 +313,7 @@ impl EditorState {
             view_right: DVec3::X,
             output,
             play,
+            play_review: None,
             can_save: true,
             insert_point: Vec3::new(0.0, 0.5, 0.0),
             requests: Vec::new(),
@@ -640,6 +648,7 @@ impl EditorState {
             },
         );
         if started {
+            self.play_review = None;
             self.output.studio("Play started on a copy of the world");
         } else if self.play.has_mode(id) && !self.play.is_playing() {
             self.note("Play could not start; see Output".into());
@@ -648,12 +657,94 @@ impl EditorState {
     }
 
     /// Stops the running session (Stop, Shift+F5, Esc): drops it with its scripts, waits and
-    /// handlers, and returns to the edit world exactly as Play found it.
+    /// handlers, and returns to the edit world exactly as Play found it, at once and with no
+    /// prompt. When a game that ran in this process changed anything, [`EditorState::play_review`]
+    /// then offers those changes; a session in other processes (Team Test) has no world to compare.
     pub fn stop_play(&mut self) {
         if self.play.is_playing() {
+            let review = self.play_changes();
             self.play.stop();
+            self.play_review = review;
             self.output.studio("Play stopped; back to the edit world");
         }
+    }
+
+    /// Compares the running game's world with the edit world (once, at Stop).
+    fn play_changes(&self) -> Option<PlayReview> {
+        let view = self.play.view()?;
+        let roots = self.visible_roots();
+        let mut group = None;
+        view.inspect_world(&mut |play| group = Some(compare(&self.world, &roots, play)));
+        PlayReview::new(vec![group?], self.history.revision())
+    }
+
+    /// The offer after Stop, while it stands: starting Play, dismissing it, keeping changes or
+    /// the first edit of the level (Undo and Redo count) ends it.
+    pub fn play_review(&self) -> Option<&PlayReview> {
+        let revision = self.history.revision();
+        self.play_review.as_ref().filter(|r| r.revision == revision)
+    }
+
+    /// The offer after Stop, mutably (Keep boxes, list open or closed).
+    pub fn play_review_mut(&mut self) -> Option<&mut PlayReview> {
+        let revision = self.history.revision();
+        self.play_review.as_mut().filter(|r| r.revision == revision)
+    }
+
+    /// Ends an offer the level has moved on from: its values were taken against the level as Play
+    /// left it, so after an edit they could undo that edit. The UI calls this once a frame.
+    pub fn sync_play_review(&mut self) {
+        if self.play_review.is_some() && self.play_review().is_none() {
+            self.play_review = None;
+            self.note("The level changed, so the changes from Play were dropped".into());
+        }
+    }
+
+    /// Opens or closes the list of changes.
+    pub fn toggle_play_review(&mut self) {
+        if let Some(review) = self.play_review_mut() {
+            review.open = !review.open;
+        }
+    }
+
+    /// Drops the offer: nothing from Play is kept.
+    pub fn dismiss_play_review(&mut self) {
+        self.play_review = None;
+    }
+
+    /// Applies the changes ticked Keep as one undo step and ends the offer; the others are gone.
+    /// Returns how many rows were kept. With none ticked, or during a gesture (the world holds
+    /// preview values), nothing happens and the offer stays.
+    pub fn keep_play_changes(&mut self) -> usize {
+        self.sync_play_review();
+        let picked = self.play_review().map_or(0, PlayReview::picked);
+        if picked == 0 {
+            return 0;
+        }
+        if self.edit_refusal().is_some() {
+            self.note("Finish or cancel the drag first".into());
+            return 0;
+        }
+        let Some(review) = self.play_review.take() else {
+            return 0;
+        };
+        let (commands, failed) = review.keep(&mut self.history, &mut self.world);
+        for why in failed {
+            let text = format!("Could not keep {why}");
+            self.output.push(Tag::Studio, Level::Warning, text);
+        }
+        if commands.is_empty() {
+            self.note("Nothing could be kept; see Output".into());
+            self.after_history_change();
+            return 0;
+        }
+        let kept = count(picked, "change");
+        self.record(Command::Batch {
+            name: format!("Keep {kept} from Play"),
+            commands,
+        });
+        self.note(format!("Kept {kept} from Play"));
+        picked
     }
 
     /// The bounding box of the selection's parts.

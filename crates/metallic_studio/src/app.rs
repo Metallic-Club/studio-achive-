@@ -394,6 +394,7 @@ impl eframe::App for StudioApp {
                     ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 }
                 editor.hints.show_tips = self.settings.settings.show_tips;
+                editor.dialog_open = self.settings_open || self.licences.is_some();
                 let exit = editor.ui(ui, frame.wgpu_render_state());
                 if editor.take_settings_request() {
                     self.settings_open = true;

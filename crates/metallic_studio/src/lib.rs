@@ -18,6 +18,9 @@
 //! and the undo, selection and gizmo APIs the building tools use ([`commands`], [`selection`],
 //! [`gizmo`]). Panels take colours, font sizes and metrics only from [`tokens::ui_tokens`].
 //!
+//! Keeping Play edits (#130): [`play::review`] compares the play world with the edit world at Stop
+//! and keeps the changes the creator picks as one undo step; [`play_review`] draws the offer.
+//!
 //! Building core (#213-#215): [`preview`] (the gesture overlay: one gesture, one undo step),
 //! [`snapping`] (point and surface snapping), [`pivot`] (pivots and rigid motions) and the
 //! drag behaviours in [`gizmo`] and [`viewport`].
@@ -67,6 +70,7 @@ pub mod panel;
 pub mod picking;
 pub mod pivot;
 pub mod play;
+pub mod play_review;
 pub mod png_image;
 pub mod preview;
 pub mod properties;
