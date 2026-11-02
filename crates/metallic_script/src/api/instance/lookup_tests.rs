@@ -1,7 +1,6 @@
 //! What keeps lookup order unobservable while old tables and the registry both answer: names do
 //! not clash on any class, so asking one before the other cannot change a script's answer.
 
-use super::*;
 use crate::api::bridge::BRIDGED_METHODS;
 use crate::api::host_methods::NOT_MIGRATED_HOST_METHODS;
 use metallic_core::classes::registry;

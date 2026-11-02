@@ -86,8 +86,37 @@ the count of handler arguments built after each step. 8,275 lines on base, 8,793
 `GetPropertyChangedSignal`; the firing section is byte-identical. `Once` and `Wait` do not exist on base, so tests cover them.
 
 ## Perf
-See the numbers in the last section of this note. No `Ir` was measured: Valgrind is not available here, so the PR's `Performance`
-job gives the first real ones. `World::set` has no changed line, and no write path reads the signal queue.
+No `Ir` was measured: Valgrind is not available here, so the PR's `Performance` job gives the first real ones. These are native
+`elapsed_ns`, Windows 11, a working desktop, not a controlled machine; about 12 GB of 15.9 GB free and under 7% CPU when sampled
+between rounds. Base `20d79fa`, head `a802c0c`'s code, both `--release`, run alternately, 31 samples, two rounds. Median change in
+each round; times are round 1, in ms.
+
+| Workload | Base min / median | Head min / median | Median change, round 1 / 2 |
+|---|---|---|---|
+| `lua_reads` | 20.856 / 21.219 | 21.154 / 21.560 | +1.6% / +2.6% |
+| `lua_writes` | 14.899 / 15.257 | 15.116 / 15.453 | +1.3% / +1.7% |
+| `lua_method_calls` | 25.581 / 25.820 | 26.253 / 26.511 | +2.7% / +2.5% |
+| `reads` | 2.339 / 2.462 | 2.407 / 2.527 | +2.6% / +3.3% |
+| `writes` | 0.959 / 1.041 | 0.982 / 1.063 | +2.1% / +3.6% |
+| `clone` | 1.183 / 1.459 | 1.178 / 1.465 | +0.4% / -3.6% |
+| `create` | 0.084 / 0.088 | 0.079 / 0.090 | +2.3% / +0.0% |
+| `destroy` | 0.441 / 0.506 | 0.434 / 0.492 | -2.8% / -4.1% |
+
+`World::set` and `World::get` have no changed line. Why the core `reads` and `writes` moved is **not established**: their paths only
+gained members in the classes' name tables, which is a candidate, along with code layout. Before the rebase, on the older base, the
+same code read `reads` -6% and `lua_writes` -3%, so differences this size change sign between builds here.
+
+Firing, from a temporary example, 15 samples, same builds (2,000 steps, or 100 steps of 200 fires):
+
+| Workload | Base median | Head median | Median change | Per unit |
+|---|---|---|---|---|
+| Step with no handlers | 1.150 ms | 1.250 ms | +8.7% | about +50 ns per step |
+| Heartbeat, one handler | 11.650 ms | 12.221 ms | +4.9% (min +0.0%) | about +285 ns per step at the median |
+| `Touched`, 200 handlers | 104.225 ms | 105.292 ms | +1.0% | about +53 ns per fire |
+| `AttributeChanged`, 200 handlers | 105.886 ms | 107.304 ms | +1.3% | about +71 ns per fire |
+
+The idle step pays for the Heartbeat name lookup and the empty checks. None of these is a gated workload. `Changed` has no base to
+compare with: a VM with no `Changed` listener returns early, and with one it reads one journal entry per change since the last step.
 
 ## Commands
 ```
@@ -111,3 +140,13 @@ cargo run -q -p metallic_core --example registry_hash
 - **#468:** `check_signal_context` is the signal half already; the same shape fits properties and methods.
 - **#474:** `connect_signal`, `disconnect` and `ScriptValue::Signal` are what WIT needs. `Once` and `Wait` are Luau-side only today;
   `WaitRequest::Signal` is the neutral form of `Wait`.
+
+## Open questions
+None blocking.
+
+## Last check results (on main `20d79fa`, with the local `enums.rs` change above)
+`cargo test --workspace -j 4 --no-fail-fast` at `a802c0c`: 2503 passed, 1 failed, 10 ignored. `metallic_render --test shading
+gpu_timing_measures_a_frame_where_supported` fails alone too: the known #436. No other failure, so no #497 reruns were needed. After
+that run one unused test import was removed from `lookup_tests.rs`, and `cargo test -p metallic_script --lib` passed again: 23 passed, 2
+ignored. `cargo clippy --workspace --all-targets -j 4 -- -D warnings`: clean. `cargo deny check licenses`: licenses ok. `cargo fmt --all --
+--check` and the class-file rustfmt step: clean.
