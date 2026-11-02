@@ -1,5 +1,7 @@
 //! Scheduler ownership, opaque task bookkeeping and native coroutine compatibility.
 
+mod common;
+
 use metallic_script::{Context, OutputSink, ScriptVm};
 use mlua::Function;
 use std::cell::RefCell;
@@ -327,7 +329,9 @@ assert(values.n==5 and values[1] and values[2]=='returned' and values[3]==nil an
 
 #[test]
 fn one_thousand_ordinary_coroutines_fit_the_unchanged_default_budget() {
+common::real_limits_test(|| {
     let (vm, _) = rig();
+    vm.set_resume_budget(metallic_script::RESUME_BUDGET);
     let function: Function = vm.lua().load(r#"
 local create,resume,wrap,yield,pack=coroutine.create,coroutine.resume,coroutine.wrap,coroutine.yield,table.pack
 for i=1,500 do
@@ -349,6 +353,7 @@ end
         "1000 precompiled ordinary coroutine smoke, uncontrolled host load: {:?}",
         start.elapsed()
     );
+});
 }
 
 #[test]

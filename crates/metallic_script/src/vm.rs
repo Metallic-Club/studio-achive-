@@ -59,7 +59,7 @@ pub fn use_test_budgets_if_a_test_asked() {
 
 /// The resume budget a new VM or host starts with.
 pub(crate) fn initial_resume_budget() -> Duration {
-    if TEST_BUDGETS.get() {
+    if cfg!(test) || TEST_BUDGETS.get() {
         TEST_RESUME_BUDGET
     } else {
         RESUME_BUDGET
@@ -68,7 +68,7 @@ pub(crate) fn initial_resume_budget() -> Duration {
 
 /// The step budget a new VM or host starts with.
 pub(crate) fn initial_step_budget_sec() -> f64 {
-    if TEST_BUDGETS.get() {
+    if cfg!(test) || TEST_BUDGETS.get() {
         TEST_STEP_BUDGET_SEC
     } else {
         STEP_BUDGET_SEC

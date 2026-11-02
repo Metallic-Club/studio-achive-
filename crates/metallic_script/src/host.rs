@@ -1225,7 +1225,6 @@ mod role_tests {
             )
             .unwrap();
         let world = Rc::new(RefCell::new(world));
-        crate::vm::use_test_budgets_on_this_thread();
         let mut host = ScriptHost::new_server(world.clone(), Rc::new(Quiet));
         host.start().unwrap();
         assert!(host.server.is_some() && host.client.is_none());

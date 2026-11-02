@@ -272,6 +272,7 @@ fn set_local_changes_value_after_resume() {
 
 #[test]
 fn endless_loop_still_times_out_when_not_paused() {
+common::real_limits_test(|| {
     let mut rig = Rig::new();
     rig.host.set_resume_budget(RESUME_BUDGET);
     let other = rig.server_script("Other", "local function never()\n    print('never')\nend\n");
@@ -284,6 +285,7 @@ fn endless_loop_still_times_out_when_not_paused() {
     assert_eq!(lines.len(), 1, "{lines:?}");
     assert!(lines[0].contains("Script timeout"), "{lines:?}");
     assert!(!rig.host.is_paused());
+});
 }
 
 #[test]

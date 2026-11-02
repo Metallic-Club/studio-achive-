@@ -792,7 +792,6 @@ mod ownership_tests {
 
     fn assert_cancellation_survives_failed_resume(source: &str) {
         let trace = Rc::new(Trace::default());
-        crate::vm::use_test_budgets_on_this_thread();
         let mut vm =
             crate::vm::ScriptVm::with_output(crate::vm::Context::Server, trace.clone()).unwrap();
         let owner = u64::MAX - 17;

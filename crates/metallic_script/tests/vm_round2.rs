@@ -1,5 +1,7 @@
 //! Round-2 hardening tests: bounded pattern matching, weak budget handle, error reporting.
 
+mod common;
+
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -43,6 +45,7 @@ fn strict_vm() -> (ScriptVm, Rc<Capture>) {
 
 #[test]
 fn single_quantifier_pathological_find_times_out_or_errors_fast() {
+common::real_limits_test(|| {
     let (mut vm, _) = strict_vm();
     let start = Instant::now();
     for src in [
@@ -66,10 +69,12 @@ fn single_quantifier_pathological_find_times_out_or_errors_fast() {
         start.elapsed()
     );
     vm.run_script("T", "print('alive')").unwrap();
+});
 }
 
 #[test]
 fn trim_pattern_on_100kb_works() {
+common::real_limits_test(|| {
     let (mut vm, _) = vm();
     let start = Instant::now();
     vm.run_script(
@@ -85,6 +90,7 @@ fn trim_pattern_on_100kb_works() {
         "{:?}",
         start.elapsed()
     );
+});
 }
 
 #[test]
@@ -174,6 +180,7 @@ fn pattern_results_match_luau_for_common_cases() {
 
 #[test]
 fn string_rep_with_string_count_is_bounded() {
+common::real_limits_test(|| {
     let (mut vm, _) = vm();
     let start = Instant::now();
     let err = vm
@@ -195,6 +202,7 @@ fn string_rep_with_string_count_is_bounded() {
     )
     .unwrap();
     assert!(start.elapsed() < Duration::from_secs(1));
+});
 }
 
 struct DropSink(Rc<RefCell<u32>>);
@@ -244,6 +252,7 @@ fn budget_errors_cleanly_when_vm_is_gone() {
 
 #[test]
 fn timeout_reported_once() {
+common::real_limits_test(|| {
     let (mut vm, sink) = strict_vm();
     // A spawned thread times out inside run_script: one error, returned, none in the sink.
     let err = vm
@@ -270,10 +279,12 @@ fn timeout_reported_once() {
     vm.step(10.0);
     assert_eq!(sink.lines.borrow().len(), 1, "{:?}", sink.lines.borrow());
     assert!(sink.lines.borrow()[0].starts_with("error:V:1: Script timeout"));
+});
 }
 
 /// Runs `src` and asserts it stops with a pattern/timeout error within 0.5 s (#166).
 fn assert_pattern_stops_fast(src: &str) {
+common::real_limits_test(|| {
     let (mut vm, _) = strict_vm();
     let start = Instant::now();
     let err = vm.run_script("T", src).unwrap_err();
@@ -286,6 +297,7 @@ fn assert_pattern_stops_fast(src: &str) {
     assert!(took < Duration::from_secs(5), "took {took:?}");
     vm.run_script("T", "assert(string.match('abc', '[a-c]+') == 'abc')")
         .unwrap();
+});
 }
 
 #[test]
@@ -346,6 +358,7 @@ fn assert_stops_early(build: &str, src: &str, min_plain: Duration) {
 
 #[test]
 fn big_string_sort_with_shared_prefix_is_interruptible() {
+common::real_limits_test(|| {
     // Every comparison is a long memcmp in C.
     assert_stops_early(
         "local p = string.rep('a', 1500)
@@ -355,6 +368,7 @@ fn big_string_sort_with_shared_prefix_is_interruptible() {
         "table.sort(big)",
         Duration::from_millis(150),
     );
+});
 }
 
 #[test]
@@ -381,6 +395,7 @@ fn big_sort_with_a_c_lt_metamethod_is_interruptible() {
 
 #[test]
 fn huge_number_sort_without_comparator_is_interruptible() {
+common::real_limits_test(|| {
     // Above the C-sort cap numbers also go through the Lua closure.
     let (mut vm, _) = vm();
     let big: mlua::Table = vm
@@ -398,10 +413,12 @@ fn huge_number_sort_without_comparator_is_interruptible() {
         "{:?}",
         start.elapsed()
     );
+});
 }
 
 #[test]
 fn big_sort_with_a_lua_comparator_stays_interruptible() {
+common::real_limits_test(|| {
     let (mut vm, _) = vm();
     let big: mlua::Table = vm
         .lua()
@@ -420,10 +437,12 @@ fn big_sort_with_a_lua_comparator_stays_interruptible() {
         "{:?}",
         start.elapsed()
     );
+});
 }
 
 #[test]
 fn sorting_200k_numbers_without_a_comparator_fits_the_default_budget() {
+common::real_limits_test(|| {
     let (mut vm, _) = vm();
     let big: mlua::Table = vm
         .lua()
@@ -444,6 +463,7 @@ fn sorting_200k_numbers_without_a_comparator_fits_the_default_budget() {
     vm.set_resume_budget(Duration::from_secs(5));
     vm.run_script("T", "for i = 2, 200000 do assert(big[i - 1] <= big[i]) end")
         .unwrap();
+});
 }
 
 #[test]
@@ -493,6 +513,7 @@ fn normal_sorts_behave_as_before() {
 
 #[test]
 fn gsub_replacement_loop_is_bounded() {
+common::real_limits_test(|| {
     // 1M empty matches x 64 bytes: ~64 MB appended, about 10 s unbounded in a debug build.
     let (mut vm, _) = strict_vm();
     let start = Instant::now();
@@ -515,6 +536,7 @@ fn gsub_replacement_loop_is_bounded() {
     );
     vm.run_script("T", "assert(string.gsub('abc', '', '-') == '-a-b-c-')")
         .unwrap();
+});
 }
 
 #[test]
@@ -527,6 +549,7 @@ fn back_reference_compares_are_charged() {
 
 #[test]
 fn gsub_charges_replacement_bytes_scanned_not_only_appended() {
+common::real_limits_test(|| {
     // '%0' on matches that are all empty appends nothing, yet the 64 MB replacement is walked
     // for every match: 20 matches x 64M bytes.
     let (mut vm, _) = strict_vm();
@@ -548,6 +571,7 @@ fn gsub_charges_replacement_bytes_scanned_not_only_appended() {
         "{:?}",
         start.elapsed()
     );
+});
 }
 
 // ---- #344: the remaining unbounded C calls ----
@@ -749,6 +773,7 @@ fn concat_chunk_boundaries_join_correctly() {
 
 #[test]
 fn huge_pack_formats_are_refused() {
+common::real_limits_test(|| {
     let (mut vm, _) = vm();
     vm.set_resume_budget(Duration::from_secs(5));
     let start = Instant::now();
@@ -805,10 +830,12 @@ fn huge_pack_formats_are_refused() {
          assert(string.packsize(big) == 30000)",
     )
     .unwrap();
+});
 }
 
 #[test]
 fn huge_strings_are_refused_by_whole_string_passes() {
+common::real_limits_test(|| {
     let (mut vm, _) = vm();
     vm.set_resume_budget(Duration::from_secs(5));
     let start = Instant::now();
@@ -842,10 +869,12 @@ fn huge_strings_are_refused_by_whole_string_passes() {
          assert(string.upper(5) == '5')",
     )
     .unwrap();
+});
 }
 
 #[test]
 fn huge_split_subjects_are_refused() {
+common::real_limits_test(|| {
     let (mut vm, _) = vm();
     vm.set_resume_budget(Duration::from_secs(5));
     let start = Instant::now();
@@ -868,4 +897,5 @@ fn huge_split_subjects_are_refused() {
          assert(#string.split(string.rep('x,', 400000), ',') == 400001)",
     )
     .unwrap();
+});
 }

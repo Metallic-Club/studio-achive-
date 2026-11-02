@@ -301,7 +301,6 @@ mod tests {
                 Value::String("local n = 0\nn += 1\n".into()),
             )
             .unwrap();
-        crate::vm::use_test_budgets_on_this_thread();
         let mut host = ScriptHost::new(world, Rc::new(Quiet));
         host.start().unwrap();
         assert!(!hooked(&host), "no breakpoints: the VM runs unhooked");

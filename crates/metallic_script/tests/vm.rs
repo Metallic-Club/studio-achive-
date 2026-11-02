@@ -1,5 +1,7 @@
 //! Behaviour tests for the sandboxed Luau VM.
 
+mod common;
+
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -81,6 +83,7 @@ fn forbidden_globals_are_nil() {
 
 #[test]
 fn endless_loop_times_out() {
+common::real_limits_test(|| {
     let (mut vm, sink) = strict_vm();
     let start = Instant::now();
     let err = vm
@@ -96,6 +99,7 @@ fn endless_loop_times_out() {
     vm.run_script("Workspace.Next", "print('still alive')")
         .unwrap();
     assert_eq!(sink.lines.borrow().last().unwrap(), "print:still alive");
+});
 }
 
 #[test]
@@ -188,6 +192,7 @@ fn thread_error_goes_to_sink() {
 
 #[test]
 fn timeout_error_has_chunk_prefix() {
+common::real_limits_test(|| {
     let (mut vm, sink) = strict_vm();
     let err = vm
         .run_script("Workspace.Loop", "local x = 1\n\nwhile true do end")
@@ -215,6 +220,7 @@ fn timeout_error_has_chunk_prefix() {
         "{}",
         err.message
     );
+});
 }
 
 #[test]
@@ -242,6 +248,7 @@ fn table_error_is_formatted_safely() {
 
 #[test]
 fn nested_resume_keeps_outer_budget() {
+common::real_limits_test(|| {
     let (mut vm, _) = strict_vm();
     let budget = vm.budget();
     let host = vm
@@ -257,10 +264,12 @@ fn nested_resume_keeps_outer_budget() {
         .unwrap_err();
     assert!(err.message.contains("Script timeout"), "{}", err.message);
     assert!(start.elapsed() < Duration::from_secs(1));
+});
 }
 
 #[test]
 fn call_with_budget_times_out_and_returns_values() {
+common::real_limits_test(|| {
     let (mut vm, _) = strict_vm();
     let f: Function = vm
         .lua()
@@ -276,10 +285,12 @@ fn call_with_budget_times_out_and_returns_values() {
     let err = vm.call_with_budget::<()>(&g, ()).unwrap_err();
     assert!(err.message.contains("Script timeout"), "{}", err.message);
     vm.run_script("T", "print('ok')").unwrap();
+});
 }
 
 #[test]
 fn many_threads_cannot_stall_one_step() {
+common::real_limits_test(|| {
     let (mut vm, _) = strict_vm();
     for i in 0..60 {
         vm.run_script(
@@ -299,10 +310,12 @@ fn many_threads_cannot_stall_one_step() {
     let again = Instant::now();
     vm.step(2.0);
     assert!(again.elapsed() > Duration::from_millis(100));
+});
 }
 
 #[test]
 fn pathological_pattern_is_rejected_or_budgeted() {
+common::real_limits_test(|| {
     let (mut vm, _) = strict_vm();
     let start = Instant::now();
     for src in [
@@ -330,6 +343,7 @@ fn pathological_pattern_is_rejected_or_budgeted() {
         "assert(string.match('  hi  ', '^%s*(.-)%s*$') == 'hi')",
     )
     .unwrap();
+});
 }
 
 #[test]
@@ -383,6 +397,7 @@ fn rawset_on_library_fails() {
 
 #[test]
 fn pcall_wrapped_loop_still_times_out() {
+common::real_limits_test(|| {
     let (mut vm, _) = strict_vm();
     let start = Instant::now();
     let err = vm
@@ -400,6 +415,7 @@ fn pcall_wrapped_loop_still_times_out() {
         .unwrap_err();
     assert!(err.message.contains("Script timeout"), "{}", err.message);
     assert!(start.elapsed() < Duration::from_secs(1));
+});
 }
 
 #[test]

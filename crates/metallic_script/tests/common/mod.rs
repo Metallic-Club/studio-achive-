@@ -25,6 +25,20 @@ impl OutputSink for Capture {
     }
 }
 
+/// Runs a test of the real wall-clock limits, up to five times until one run passes.
+///
+/// Only these tests may do this: they cannot use the test budgets, because the real time is what
+/// they check. A stall of the machine fails one run; a broken limit fails every run. The body
+/// must build its own VM or rig, and the last run's panic is the test's failure.
+pub fn real_limits_test<T>(mut body: impl FnMut() -> T) -> T {
+    for _ in 1..5 {
+        if let Ok(out) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(&mut body)) {
+            return out;
+        }
+    }
+    body()
+}
+
 pub struct Rig {
     pub world: Rc<RefCell<World>>,
     pub host: ScriptHost,

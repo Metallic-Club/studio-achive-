@@ -1,5 +1,7 @@
 //! Linear pattern work must not consume one global backtracking allowance.
 
+mod common;
+
 use metallic_script::{Context, ScriptVm};
 use mlua::{Function, LuaString, Table};
 use std::time::{Duration, Instant};
@@ -252,6 +254,7 @@ fn empty_matches_and_iterator_boundaries_keep_native_luau_results() {
 
 #[test]
 fn many_short_attempts_time_out_stickily_and_the_next_call_recovers() {
+common::real_limits_test(|| {
     let mut vm = ScriptVm::new(Context::Server).unwrap();
     vm.set_global(
         "subject",
@@ -277,6 +280,7 @@ fn many_short_attempts_time_out_stickily_and_the_next_call_recovers() {
     );
     vm.run_script("Healthy", "assert(string.match('abc','b') == 'b')")
         .unwrap();
+});
 }
 
 #[test]

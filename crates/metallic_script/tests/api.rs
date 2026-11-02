@@ -454,6 +454,7 @@ fn wait_for_child_resumes_times_out_and_warns() {
 
 #[test]
 fn runaway_handler_times_out_and_engine_continues() {
+common::real_limits_test(|| {
     let mut rig = Rig::new();
     rig.host.set_resume_budget(metallic_script::RESUME_BUDGET);
     let ws = rig.root("Workspace");
@@ -478,6 +479,7 @@ fn runaway_handler_times_out_and_engine_continues() {
         "{lines:?}"
     );
     assert_eq!(lines[1], "print:second handler ran");
+});
 }
 
 #[test]

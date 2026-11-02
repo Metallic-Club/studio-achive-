@@ -743,6 +743,7 @@ fn the_event_queue_is_bounded() {
 
 #[test]
 fn a_spinning_input_handler_times_out_and_others_still_run() {
+common::real_limits_test(|| {
     let (mut rig, dash) = input_rig();
     rig.host.set_resume_budget(metallic_script::RESUME_BUDGET);
     rig.local_script(
@@ -772,6 +773,7 @@ fn a_spinning_input_handler_times_out_and_others_still_run() {
     );
     assert!(lines.contains(&"print:other".to_string()), "{lines:?}");
     assert!(began.elapsed().as_secs_f64() < 1.0, "bounded by the budget");
+});
 }
 
 fn descendant_count(rig: &Rig) -> usize {

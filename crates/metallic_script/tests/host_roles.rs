@@ -644,6 +644,7 @@ end)
 
 #[test]
 fn synchronous_removal_uses_one_aggregate_budget_for_independent_owners() {
+common::real_limits_test(|| {
     let mut rig = rig(ScriptRole::Server);
     rig.host
         .set_step_budget_sec(metallic_script::STEP_BUDGET_SEC);
@@ -672,10 +673,12 @@ fn synchronous_removal_uses_one_aggregate_budget_for_independent_owners() {
         "{:?}",
         rig.lines()
     );
+});
 }
 
 #[test]
 fn removal_preserves_a_held_input_budget_instead_of_resetting_it() {
+common::real_limits_test(|| {
     let mut rig = rig(ScriptRole::Combined);
     rig.host
         .set_step_budget_sec(metallic_script::STEP_BUDGET_SEC);
@@ -703,10 +706,12 @@ fn removal_preserves_a_held_input_budget_instead_of_resetting_it() {
         "{:?}",
         rig.lines()
     );
+});
 }
 
 #[test]
 fn input_dispatch_does_not_resume_deferred_work_after_gui_ownership_changes() {
+common::real_limits_test(|| {
     let mut rig = rig(ScriptRole::Client);
     rig.host
         .set_step_budget_sec(metallic_script::STEP_BUDGET_SEC);
@@ -769,6 +774,7 @@ fn input_dispatch_does_not_resume_deferred_work_after_gui_ownership_changes() {
         1,
         "pruning must not consume pending start changes"
     );
+});
 }
 
 #[test]
@@ -811,6 +817,7 @@ fn lifecycle_dispatch_does_not_call_handlers_after_gui_ownership_changes() {
 
 #[test]
 fn client_input_dispatch_postpones_lua_when_world_scope_is_borrowed() {
+common::real_limits_test(|| {
     let mut rig = rig(ScriptRole::Client);
     rig.host
         .set_step_budget_sec(metallic_script::STEP_BUDGET_SEC);
@@ -851,6 +858,7 @@ fn client_input_dispatch_postpones_lua_when_world_scope_is_borrowed() {
         8,
         "postponed valid work must remain queued"
     );
+});
 }
 
 #[test]

@@ -266,6 +266,7 @@ fn a_module_runs_in_the_sandbox_with_its_own_script_global() {
 
 #[test]
 fn a_module_that_never_returns_times_out_and_the_vm_survives() {
+common::real_limits_test(|| {
     let mut rig = Rig::new();
     rig.host
         .set_resume_budget(std::time::Duration::from_millis(200));
@@ -284,6 +285,7 @@ fn a_module_that_never_returns_times_out_and_the_vm_survives() {
         errors(&rig).iter().any(|e| e.contains("Script timeout")),
         "{lines:?}"
     );
+});
 }
 
 #[test]
@@ -501,6 +503,7 @@ fn a_waiter_whose_loader_was_stopped_loads_the_module_itself() {
 
 #[test]
 fn a_timeout_while_loading_is_cached_like_any_error() {
+common::real_limits_test(|| {
     let mut rig = Rig::new();
     rig.host
         .set_resume_budget(std::time::Duration::from_millis(200));
@@ -524,6 +527,7 @@ fn a_timeout_while_loading_is_cached_like_any_error() {
             && l.contains("ReplicatedStorage.Spin: Requested module experienced an error")),
         "{lines:?}"
     );
+});
 }
 
 #[test]

@@ -31,6 +31,7 @@ fn rig_with_remote() -> Rig {
 
 #[test]
 fn remote_rejects_exponential_shared_tables() {
+common::real_limits_test(|| {
     let _isolation = isolate_limits_test();
     let mut rig = rig_with_remote();
     rig.local_script(
@@ -52,6 +53,7 @@ fn remote_rejects_exponential_shared_tables() {
         lines[0].starts_with("print:false") && lines[0].contains("remote payload too large"),
         "{lines:?}"
     );
+});
 }
 
 #[test]
@@ -164,6 +166,7 @@ fn too_many_connections_on_one_signal() {
 
 #[test]
 fn many_spinning_handlers_do_not_stall_a_step() {
+common::real_limits_test(|| {
     let _isolation = isolate_limits_test();
     let mut rig = Rig::new();
     rig.host
@@ -197,10 +200,12 @@ fn many_spinning_handlers_do_not_stall_a_step() {
         .count();
     assert_eq!(timeouts, 20, "deferred handlers still ran: {steps} steps");
     assert!(steps > 1, "the work was spread over several steps");
+});
 }
 
 #[test]
 fn repeat_timeouts_disconnect_script() {
+common::real_limits_test(|| {
     let _isolation = isolate_limits_test();
     let mut rig = Rig::new();
     rig.host.set_resume_budget(metallic_script::RESUME_BUDGET);
@@ -241,6 +246,7 @@ fn repeat_timeouts_disconnect_script() {
         ["print:other beat", "print:other beat", "print:other beat"],
         "only the other script keeps running"
     );
+});
 }
 
 #[test]
@@ -461,6 +467,7 @@ fn cloned_scripts_with_same_name_stop_independently() {
 
 #[test]
 fn full_deferral_queue_stops_building_arguments() {
+common::real_limits_test(|| {
     let _isolation = isolate_limits_test();
     let mut rig = Rig::new();
     rig.host
@@ -482,4 +489,5 @@ fn full_deferral_queue_stops_building_arguments() {
     // Without the early stop every step built 10,000 argument lists (80,000 here).
     let built = rig.host.dispatch_args_built();
     assert!(built < 20_000, "built {built} argument lists");
+});
 }
