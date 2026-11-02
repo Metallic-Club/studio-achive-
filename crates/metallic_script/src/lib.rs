@@ -17,8 +17,10 @@
 //! [`ScriptHost::with_role`] selects explicit [`ScriptRole`]s, including a Client VM with
 //! deferred local-player binding. Player registration/removal uses trusted World-local IDs.
 //!
-//! [`host_methods`] is the table of methods core declares `Host` and this crate implements. The
-//! Luau binding does not dispatch through it until #462.
+//! Instance members come from the class registry: `api/instance.rs` resolves a name through the
+//! instance's class and calls `HostApi` (`api/host_api.rs`), so a member a class file declares is
+//! visible to scripts with no change here. [`host_methods`] is the table of methods core declares
+//! `Host` and this crate implements.
 
 #![warn(missing_docs)]
 
@@ -29,6 +31,8 @@ mod pattern;
 mod task_lib;
 mod vm;
 
+#[doc(hidden)]
+pub use api::FixtureApi;
 pub use api::host_methods::{
     HostCall, HostMethodFn, HostState, NOT_MIGRATED_HOST_METHODS, host_methods,
 };

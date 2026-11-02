@@ -39,7 +39,7 @@ fn normal_id(v: &Value) -> mlua::Result<NormalId> {
     found.ok_or_else(|| lua_error("Resize: expected an Enum.NormalId"))
 }
 
-/// The methods, by name. Which classes have them is in `instance::CLASS_METHODS`.
+/// The methods, by name. Which classes have them is in `api/bridge.rs`.
 pub(crate) fn methods(lua: &Lua) -> mlua::Result<Vec<(&'static str, Function)>> {
     let get_pivot = lua.create_function(|_, this: UserDataRef<LuaInstance>| {
         expect_pv(&this, "GetPivot")?;
