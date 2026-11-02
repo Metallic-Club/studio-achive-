@@ -517,8 +517,8 @@ fn parked_results(
         WaitRequest::Signal { key } => {
             if !state.names_a_signal(key) {
                 // Nothing can resume a key that names no signal. This text is pinned by
-                // `tests/generic_binding.rs`, the one place that reaches it (see the #463 note).
-                return Err(lua_error("waiting for a signal arrives with #463"));
+                // `tests/generic_binding.rs`, the one place that reaches it.
+                return Err(lua_error("cannot wait for a signal this class does not have"));
             }
             state.wait_for_signal(key, lua.current_thread())?;
             Ok((Value::Table(park.clone()), MultiValue::new()))

@@ -615,7 +615,7 @@ fn a_yielding_method_can_sleep_and_refuses_what_nothing_can_resume() {
     assert_eq!(
         lines,
         [
-            "false Test:6: waiting for a signal arrives with #463",
+            "false Test:6: cannot wait for a signal this class does not have",
             "false Test:7: WaitsUndeclared waited but is not declared as yielding",
             "waiting",
         ]
