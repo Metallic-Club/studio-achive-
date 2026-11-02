@@ -1,7 +1,7 @@
 //! The Luau `Instance`: a light userdata around an [`InstanceId`], member lookup through the class
 //! registry and [`HostApi`], `Instance.new` and `WaitForChild`.
 //!
-//! Lookup order, for a name that is not one of the arms still waiting for #463 and #464: property,
+//! Lookup order, for a name that is not one of the arms still waiting for #464: property,
 //! method, signal, callback, child by name. Names are unique across a class's members, so one
 //! table lookup covers the first four. See `api/host_api.rs` for the host side.
 

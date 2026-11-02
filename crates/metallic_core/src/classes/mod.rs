@@ -11,6 +11,10 @@
 //! [`CallOutcome`], [`ApiError`]; `call.rs` has "How to write a method"), and every language binding
 //! goes through one interface ([`HostApi`]). This crate knows no scripting language.
 //!
+//! Signals are members too ([`SignalDesc`], "How to add a signal" in `ARCHITECTURE.md`): keyed by
+//! [`SignalKey`], fired with [`World::fire`](crate::World::fire) or [`MethodCall::fire`], and held in
+//! the world's [`SignalQueue`](crate::SignalQueue) until the script host's next step.
+//!
 //! # Adding a class
 //!
 //! Create `src/classes/<group>/<class>.rs` with a `pub static CLASS: ClassDesc` and nothing else

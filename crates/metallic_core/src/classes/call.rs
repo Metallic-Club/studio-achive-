@@ -31,7 +31,8 @@
 //! A method that needs the script host (fires a remote, calls back into script code, reads host
 //! state) is declared with [`MethodDesc::host`] and implemented in `metallic_script`; see
 //! [`HostMethods`](super::HostMethods). A method that parks its caller is declared with
-//! [`MethodDesc::yields`] and returns [`CallOutcome::Wait`].
+//! [`MethodDesc::yields`] and returns [`CallOutcome::Wait`]. A method fires a signal its class declares
+//! with [`MethodCall::fire`]; see "How to add a signal" in `ARCHITECTURE.md`.
 use super::desc::{ANY_FUNCTION, ArgCheck, MethodDesc, Ty};
 use super::resolve::{MemberId, MemberKind, Registry};
 use crate::cframe::CFrame;
