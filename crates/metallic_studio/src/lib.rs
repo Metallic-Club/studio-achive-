@@ -76,6 +76,7 @@ pub mod script_editor;
 pub mod selection;
 pub mod settings;
 pub mod settings_ui;
+pub mod smart_duplicate;
 pub mod snapping;
 pub mod splash;
 pub mod start_screen;

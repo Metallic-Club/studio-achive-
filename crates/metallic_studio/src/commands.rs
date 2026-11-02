@@ -617,6 +617,23 @@ impl Command {
             _ => Vec::new(),
         }
     }
+
+    /// True when this step does nothing but move instances `within` accepts: every real change
+    /// is their `Position`, `Orientation` or `WorldPivot`. (Smart duplicate: a resize, a colour
+    /// or an edit of anything else is not a move of the copy.)
+    pub fn only_moves(&self, within: &dyn Fn(InstanceId) -> bool) -> bool {
+        let moves = |id: InstanceId, prop: &str, old: &Value, new: &Value| {
+            old == new || (matches!(prop, "Position" | "Orientation" | "WorldPivot") && within(id))
+        };
+        match self {
+            Command::SetProperty { id, prop, old, new } => moves(*id, prop, old, new),
+            Command::SetProperties { changes, .. } => changes
+                .iter()
+                .all(|(id, prop, old, new)| moves(*id, prop, old, new)),
+            Command::Batch { commands, .. } => commands.iter().all(|c| c.only_moves(within)),
+            _ => false,
+        }
+    }
 }
 
 /// "1 part", "12 parts".
@@ -870,6 +887,18 @@ impl History {
             return None;
         }
         self.undo.last_mut().map(|e| &mut e.command)
+    }
+
+    /// The serial of the step Undo would revert. Serials stay with a step through undo and redo.
+    pub fn newest_serial(&self) -> Option<u64> {
+        self.undo.last().map(|e| e.serial)
+    }
+
+    /// The undo steps newer than the step with `serial`, oldest first; `None` when that step is
+    /// no longer on the undo list (undone, or dropped by the history limit).
+    pub fn steps_after(&self, serial: u64) -> Option<impl Iterator<Item = &Command>> {
+        let at = self.undo.iter().rposition(|e| e.serial == serial)?;
+        Some(self.undo[at + 1..].iter().map(|e| &e.command))
     }
 
     /// The step Undo would revert.
